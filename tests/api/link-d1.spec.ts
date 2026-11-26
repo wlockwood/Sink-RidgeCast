@@ -77,7 +77,7 @@ describe('d1 link integration', () => {
     await clearLinkMigrationState()
   })
 
-  it('uses D1 for management queries and valid KV hits for redirects', async () => {
+  it('uses D1 for management queries and redirects even when KV has a different row', async () => {
     const link = makeLink()
     const response = await postJson('/api/link/create', { slug: link.slug, url: link.url })
     expect(response.status).toBe(201)
@@ -93,7 +93,7 @@ describe('d1 link integration', () => {
 
     const redirect = await fetch(`/${link.slug}`, { redirect: 'manual' })
     expect(redirect.status).toBe(301)
-    expect(redirect.headers.get('Location')).toBe('https://tampered.example/')
+    expect(redirect.headers.get('Location')).toBe(link.url)
     expect(await getStoredLink(link.slug)).toMatchObject({ slug: link.slug, url: 'https://tampered.example/' })
   })
 
@@ -264,7 +264,7 @@ describe('d1 link integration', () => {
     expect(after?.count).toBe(before?.count)
   })
 
-  it('falls back to D1 for redirects when the completed D1 run has no KV cache', async () => {
+  it('redirects from D1 when there is no KV copy', async () => {
     const link = makeLink()
     await insertD1Link(link)
     await env.KV.delete(`link:${link.slug}`)
@@ -272,7 +272,23 @@ describe('d1 link integration', () => {
     const redirect = await fetch(`/${link.slug}`, { redirect: 'manual' })
     expect(redirect.status).toBe(301)
     expect(redirect.headers.get('Location')).toBe(link.url)
-    expect(await getStoredLink(link.slug)).toMatchObject({ slug: link.slug, url: link.url })
+    expect(await getStoredLink(link.slug)).toBeNull()
+  })
+
+  it('does not resolve a stale mixed-case legacy key after deleting the migrated link', async () => {
+    await clearLinkMigrationState()
+    const lowerSlug = trackSlug(`legacy-mixed-${crypto.randomUUID()}`)
+    const legacySlug = trackSlug(lowerSlug.toUpperCase())
+    const link = makeLink(legacySlug)
+    await putKvLink(link)
+
+    expect((await fetch(`/${legacySlug}`, { redirect: 'manual' })).status).toBe(301)
+    await runMigration(false)
+    expect((await fetch(`/${legacySlug}`, { redirect: 'manual' })).status).toBe(301)
+    expect((await postJson('/api/link/delete', { slug: lowerSlug })).status).toBe(204)
+
+    expect(await getStoredLink(legacySlug)).toMatchObject({ slug: legacySlug })
+    expect((await fetch(`/${legacySlug}`, { redirect: 'manual' })).status).toBe(404)
   })
 
   it('writes legacy KV links to D1 only through explicit migration', async () => {
@@ -394,8 +410,7 @@ describe('d1 link integration', () => {
     await runMigration(true)
 
     const redirect = await fetch(`/${link.slug}`, { redirect: 'manual' })
-    expect(redirect.status).toBe(301)
-    expect(redirect.headers.get('Location')).toBe(link.url)
+    expect(redirect.status).toBe(404)
     expect(await getStoredLink(link.slug)).toMatchObject({ slug: link.slug })
     expect(await getD1Link(link.slug)).toBeNull()
     expect((await db.select({ slug: linkTombstones.slug }).from(linkTombstones).where(eq(linkTombstones.slug, link.slug)).limit(1))[0] ?? null).not.toBeNull()
@@ -694,22 +709,19 @@ describe('d1 link integration', () => {
     expect((await fetchWithAuth(`/api/link/search?q=${encodeURIComponent('İ'.repeat(17))}`)).status).toBe(400)
   })
 
-  it('fills KV from a D1 redirect miss without leaking internal fields', async () => {
+  it('checks D1 expiration without consulting KV', async () => {
     const active = makeLink()
     await insertD1Link(active)
     await env.KV.delete(`link:${active.slug}`)
     const redirect = await fetch(`/${active.slug}`, { redirect: 'manual' })
     expect(redirect.status).toBeGreaterThanOrEqual(300)
-    const cached = await getStoredLink(active.slug)
-    expect(cached).toMatchObject(active)
-    expect(cached).not.toHaveProperty('normalizedUrl')
-    expect(cached).not.toHaveProperty('effectiveExpiresAt')
+    expect(await getStoredLink(active.slug)).toBeNull()
 
     const expired = makeLink()
     await insertD1Link(expired, Math.floor(Date.now() / 1000) - 1)
-    await env.KV.delete(`link:${expired.slug}`)
+    await putKvLink(expired)
     expect((await fetch(`/${expired.slug}`, { redirect: 'manual' })).status).toBe(404)
-    expect(await getStoredLink(expired.slug)).toBeNull()
+    expect(await getStoredLink(expired.slug)).toMatchObject(expired)
   })
 
   it('binds a continuation cursor to the original force mode even after a completed run appears', async () => {

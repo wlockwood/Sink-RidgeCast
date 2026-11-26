@@ -4,7 +4,7 @@ import { eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/d1'
 import { expect } from 'vitest'
 import { linkMigrationRuns, links, linkTombstones } from '../server/database/schema'
-import { LINK_PASSWORD_HASH_PREFIX, LINK_PASSWORD_MASK_PREFIX } from '../shared/utils/link-password'
+import { LINK_PASSWORD_HASH_PREFIX, LINK_PASSWORD_MASK } from '../shared/utils/link-password'
 
 export const db = drizzle(env.DB)
 
@@ -102,8 +102,7 @@ export async function setLinkStoreD1Mode() {
 
 export function expectMaskedPassword(password: string | undefined, plainText: string) {
   expect(password).toBeDefined()
-  expect(password?.startsWith(LINK_PASSWORD_MASK_PREFIX), password).toBe(true)
-  expect(password).toContain(plainText.slice(-3))
+  expect(password).toBe(LINK_PASSWORD_MASK)
   expect(password).not.toBe(plainText)
   expect(password?.startsWith(LINK_PASSWORD_HASH_PREFIX)).toBe(false)
 }

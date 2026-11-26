@@ -1,5 +1,7 @@
 import type { H3Event } from 'h3'
 import { z } from 'zod'
+import { ApplicationLinkSettingsSchema, ShortenLinkSchema } from '#shared/schemas/application-link'
+import { CreateApplicationTokenSchema, RotateApplicationTokenSchema } from '#shared/schemas/application-link-token'
 import { ImportDataSchema } from '#shared/schemas/import'
 import { CreateLinkSchema, EditLinkSchema, ExactUrlSearchSchema } from '#shared/schemas/link'
 
@@ -21,12 +23,20 @@ const SCHEMA_COMPONENTS: Record<string, () => z.core.JSONSchema.JSONSchema> = {
     return schema
   },
   EditLink: () => z.toJSONSchema(EditLinkSchema, { io: 'input' }),
+  ShortenLink: () => z.toJSONSchema(ShortenLinkSchema, { io: 'input' }),
+  ApplicationLinkSettings: () => z.toJSONSchema(ApplicationLinkSettingsSchema, { io: 'input' }),
+  CreateApplicationToken: () => z.toJSONSchema(CreateApplicationTokenSchema, { io: 'input' }),
+  RotateApplicationToken: () => z.toJSONSchema(RotateApplicationTokenSchema, { io: 'input' }),
   ImportData: () => z.toJSONSchema(ImportDataSchema, { io: 'input' }),
   ExactUrlSearch: () => z.toJSONSchema(ExactUrlSearchSchema, { io: 'input' }),
 }
 
 const ROUTE_BODY_COMPONENTS: Record<string, Record<string, keyof typeof SCHEMA_COMPONENTS>> = {
   '/api/link/create': { post: 'CreateLink' },
+  '/api/link/shorten': { post: 'ShortenLink' },
+  '/api/link/application-settings': { put: 'ApplicationLinkSettings' },
+  '/api/link/application-tokens': { post: 'CreateApplicationToken' },
+  '/api/link/application-tokens/{id}/rotate': { post: 'RotateApplicationToken' },
   '/api/link/upsert': { post: 'CreateLink' },
   '/api/link/edit': { put: 'EditLink' },
   '/api/link/import': { post: 'ImportData' },

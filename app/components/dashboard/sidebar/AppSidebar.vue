@@ -38,6 +38,12 @@ const platformItems = computed<NavItem[]>(() => [
 
 const settingsItems = computed<NavItem[]>(() => [
   {
+    title: DASHBOARD_ROUTES.applicationLinks.titleKey,
+    url: DASHBOARD_ROUTES.applicationLinks.paths[0],
+    icon: DASHBOARD_ROUTES.applicationLinks.icon,
+    isActive: isActive('applicationLinks'),
+  },
+  {
     title: 'nav.migrate',
     url: '/dashboard/migrate',
     icon: DASHBOARD_ROUTES.migrate.icon,

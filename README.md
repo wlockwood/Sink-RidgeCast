@@ -2,7 +2,7 @@
 
 **A Simple, Speedy, Secure, and Serverless Link Shortener with Analytics, Running Entirely on Cloudflare.**
 
-[Website](https://sink.cool) · [Documentation](https://docs.sink.cool) · [API Reference](https://sink.cool/_docs/scalar)
+[Website](https://sink.cool) · [Documentation](https://docs.sink.cool) · [OpenAPI](https://sink.cool/_docs/openapi.json)
 
 <a href="https://trendshift.io/repositories/20331" target="_blank">
   <img
@@ -127,7 +127,7 @@ We currently support deployment to [Cloudflare Workers](https://docs.sink.cool/d
 
 ## 🔌 API
 
-[API Docs](https://docs.sink.cool/api/) · [Live Scalar Reference for the public demo instance](https://sink.cool/_docs/scalar)
+[API Docs](https://docs.sink.cool/api/) · [OpenAPI for the public demo instance](https://sink.cool/_docs/openapi.json)
 
 ## 🤖 AI Skills
 

@@ -1,6 +1,7 @@
 import { customAlphabet } from 'nanoid'
 import { z } from 'zod'
 import { LINK_PASSWORD_MASK_PREFIX } from '../utils/link-password'
+import { isHttpLinkUrl } from '../utils/link-url'
 
 const { slugRegex, reserveSlug } = useAppConfig()
 
@@ -22,17 +23,7 @@ if (!Number.isSafeInteger(configuredMaxUrlLength)
 }
 
 export const MAX_URL_LENGTH = configuredMaxUrlLength
-
 export const nanoid = (length: number = slugDefaultLength) => customAlphabet('23456789abcdefghjkmnpqrstuvwxyz', length)
-
-const GeoSchema = z.preprocess((value) => {
-  if (!value || typeof value !== 'object' || Array.isArray(value))
-    return value
-
-  return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>).map(([key, url]) => [key.trim().toUpperCase(), url]),
-  )
-}, z.record(z.string().trim().regex(/^[A-Z]{2}$/), z.string().trim().url().max(MAX_URL_LENGTH)))
 
 const TagsSchema = z.preprocess((value) => {
   if (!Array.isArray(value))
@@ -56,7 +47,20 @@ export const UrlSchema = z.string()
   .min(1, 'URL is required')
   .max(MAX_URL_LENGTH, `URL must not exceed ${MAX_URL_LENGTH} characters`)
   .url('URL format is invalid')
-export const SlugSchema = z.string().trim().max(2048).regex(new RegExp(slugRegex))
+export const HttpUrlSchema = UrlSchema.refine(isHttpLinkUrl, 'URL must use HTTP or HTTPS')
+
+function geoSchema(destination: typeof UrlSchema) {
+  return z.preprocess((value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value))
+      return value
+
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, url]) => [key.trim().toUpperCase(), url]),
+    )
+  }, z.record(z.string().trim().regex(/^[A-Z]{2}$/), destination))
+}
+
+export const SlugSchema = z.string().trim().max(2048).regex(new RegExp(slugRegex as RegExp))
 // `server/middleware/1.redirect.ts` skips reserved slugs before it looks a link up, so a
 // link written to one never redirects. Reject them where new links come in, and compare
 // case-insensitively because write paths lowercase the slug unless `caseSensitive` is set.
@@ -72,8 +76,7 @@ const ExpirationSchema = TimestampSchema.refine(expiration => expiration > Math.
   path: ['expiration'],
 })
 
-/** The writable link fields. Descriptions carry into the generated MCP tool schemas. */
-export const LinkFieldsSchema = z.object({
+const StoredLinkFieldsSchema = z.object({
   url: UrlSchema.describe('The target URL.'),
   slug: SlugSchema.describe('The slug identifying the short link.'),
   comment: z.string().trim().max(2048).optional().describe('Optional internal note.'),
@@ -88,8 +91,16 @@ export const LinkFieldsSchema = z.object({
   proxy: z.boolean().optional().describe('Reverse-proxy the destination instead of redirecting.'),
   password: LinkPasswordSchema.optional(),
   unsafe: z.boolean().optional().describe('Show a warning page before redirecting.'),
-  geo: GeoSchema.optional().describe('Geo-routing rules mapping a two-letter country code to a URL.'),
+  geo: geoSchema(UrlSchema).optional().describe('Geo-routing rules mapping a two-letter country code to a URL.'),
   tags: TagsSchema.describe('Up to 10 normalized link tags, each 1-32 characters.'),
+})
+
+/** Descriptions carry into the generated MCP tool schemas. */
+export const LinkFieldsSchema = StoredLinkFieldsSchema.extend({
+  url: HttpUrlSchema.describe('The HTTP or HTTPS target URL.'),
+  apple: HttpUrlSchema.optional().describe('Apple App Store HTTP or HTTPS redirect URL.'),
+  google: HttpUrlSchema.optional().describe('Google Play Store HTTP or HTTPS redirect URL.'),
+  geo: geoSchema(HttpUrlSchema).optional().describe('Geo-routing rules mapping a two-letter country code to an HTTP or HTTPS URL.'),
 })
 
 export const CreateLinkSchema = LinkFieldsSchema.extend({
@@ -111,7 +122,7 @@ export const ImportLinkSchema = LinkFieldsSchema.extend({
   expiration: TimestampSchema.optional(),
 })
 
-export const StoredLinkSchema = LinkFieldsSchema.extend({
+export const StoredLinkSchema = StoredLinkFieldsSchema.extend({
   id: IdSchema,
   createdAt: TimestampSchema,
   updatedAt: TimestampSchema,

@@ -22,7 +22,7 @@ File names:
 
 ## What is inside
 
-All link records in D1, including expired ones and password material. Treat every snapshot as **secret**.
+Each snapshot contains D1 link records, including expired links and password verifiers. New snapshots hash legacy plaintext passwords before writing them to R2. Treat every snapshot as **secret**.
 
 ::: warning Snapshots are sensitive
 Limit who can read the R2 bucket. Snapshots may include password material and full destination URLs.

@@ -1,4 +1,5 @@
 import type { H3Event } from 'h3'
+import type { ApplicationLinkWritePolicy } from '#shared/schemas/application-link-token'
 import type { Link } from '#shared/schemas/link'
 import type { LinkSearchItem } from '#shared/types/link'
 import type { ExpectedLinkVersion, LinkFilterOptions, ListLinksOptions, ListLinksResult, SearchLinksOptions } from '../services/link-store/d1'
@@ -43,18 +44,10 @@ async function writeThroughCache(event: H3Event, link: Link, effectiveExpiresAt?
 }
 
 export async function getLink(event: H3Event, slug: string, cacheTtl?: number): Promise<Link | null> {
-  const cached = await readLegacyKvLink(event, slug, cacheTtl)
-  if (cached.link)
-    return cached.link
+  if (await readCompletedLinkMigrationMarker(event.context.cloudflare.env))
+    return getAuthoritativeLink(event, slug)
 
-  if (!await readCompletedLinkMigrationMarker(event.context.cloudflare.env))
-    return null
-
-  const stored = await d1GetActiveLink(event, slug)
-  if (!stored)
-    return null
-  await writeThroughCache(event, stored.link, stored.effectiveExpiresAt)
-  return stored.link
+  return (await readLegacyKvLink(event, slug, cacheTtl)).link
 }
 
 export async function getAuthoritativeLink(event: H3Event, slug: string): Promise<Link | null> {
@@ -69,8 +62,8 @@ export async function getLinkWithMetadata(event: H3Event, slug: string): Promise
   return await d1GetLinkWithMetadata(event, slug)
 }
 
-export async function createLink(event: H3Event, link: Link): Promise<boolean> {
-  const result = await d1CreateLink(event, link)
+export async function createLink(event: H3Event, link: Link, applicationPolicy?: ApplicationLinkWritePolicy): Promise<boolean> {
+  const result = await d1CreateLink(event, link, applicationPolicy)
   if (!result.created)
     return false
   await writeThroughCache(event, link, result.effectiveExpiresAt)

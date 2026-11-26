@@ -41,12 +41,51 @@ describe('fetchPageMarkdown', () => {
     })
   })
 
-  it('rejects non-http protocols without fetching', async () => {
+  it.each([
+    'file:///etc/passwd',
+    'http://localhost/page',
+    'http://service.internal/page',
+    'http://127.0.0.1/page',
+    'http://[::1]/page',
+    'https://user:pass@example.com/page',
+  ])('rejects a disallowed URL without fetching', async (url) => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(fetchPageMarkdown(createEvent({}), 'file:///etc/passwd', createAI())).resolves.toBeNull()
+    await expect(fetchPageMarkdown(createEvent({}), url, createAI())).resolves.toBeNull()
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('checks redirect targets before requesting them', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(null, {
+      status: 302,
+      headers: { Location: 'http://localhost/next' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(fetchPageMarkdown(createEvent({}), 'https://example.com/page', createAI())).resolves.toBeNull()
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith(new URL('https://example.com/page'), expect.objectContaining({ redirect: 'manual' }))
+  })
+
+  it('follows a relative redirect to an allowed target', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 302, headers: { Location: '/next' } }))
+      .mockResolvedValueOnce(new Response('# Next', { headers: { 'Content-Type': 'text/markdown' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(fetchPageMarkdown(createEvent({}), 'https://example.com/page', createAI())).resolves.toBe('# Next')
+    expect(fetchMock).toHaveBeenNthCalledWith(2, new URL('https://example.com/next'), expect.objectContaining({ redirect: 'manual' }))
+  })
+
+  it('stops following redirects at the hop limit', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response(null, {
+      status: 302,
+      headers: { Location: '/loop' },
+    })))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(fetchPageMarkdown(createEvent({}), 'https://example.com/loop', createAI())).resolves.toBeNull()
+    expect(fetchMock).toHaveBeenCalledTimes(6)
   })
 
   it('caps streamed responses at 256 KiB and cancels the reader', async () => {

@@ -1,6 +1,4 @@
-import { SlugSchema } from '#shared/schemas/link'
-
-const slugValidator = SlugSchema
+import { getImageAssetContentType, IMAGE_MAX_SIZE } from '#shared/utils/image'
 
 export default eventHandler(async (event) => {
   const R2 = requireR2Bucket(event.context.cloudflare.env)
@@ -15,17 +13,9 @@ export default eventHandler(async (event) => {
     throw createError({ status: 403, statusText: 'Access denied' })
   }
 
-  // Validate slug in path: images/{slug}/{filename}
-  const parts = key.split('/')
-  if (parts.length < 3) {
-    throw createError({ status: 400, statusText: 'Invalid path format' })
-  }
-
-  const slug = parts[1]
-  const slugResult = slugValidator.safeParse(slug)
-  if (!slugResult.success) {
-    throw createError({ status: 400, statusText: 'Invalid slug format' })
-  }
+  const contentType = getImageAssetContentType(key)
+  if (!contentType)
+    throw createError({ status: 400, statusText: 'Invalid image path' })
 
   const object = await R2.get(key)
 
@@ -33,11 +23,19 @@ export default eventHandler(async (event) => {
     throw createError({ status: 404, statusText: 'Image not found' })
   }
 
-  const contentType = object.httpMetadata?.contentType || 'application/octet-stream'
+  const storedContentType = object.httpMetadata?.contentType
+  if (object.size > IMAGE_MAX_SIZE || (storedContentType && storedContentType !== contentType))
+    throw createError({ status: 415, statusText: 'Unsupported image' })
+
+  const data = await object.arrayBuffer()
+  if (detectRasterImageContentType(new Uint8Array(data)) !== contentType)
+    throw createError({ status: 415, statusText: 'Unsupported image' })
 
   setHeader(event, 'Content-Type', contentType)
+  setHeader(event, 'X-Content-Type-Options', 'nosniff')
+  setHeader(event, 'Content-Security-Policy', 'default-src \'none\'; sandbox')
   setHeader(event, 'Cache-Control', 'public, max-age=31536000, immutable')
   setHeader(event, 'ETag', object.etag)
 
-  return object.body
+  return sendWebResponse(event, new Response(data))
 })

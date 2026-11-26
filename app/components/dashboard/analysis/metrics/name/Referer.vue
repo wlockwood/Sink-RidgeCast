@@ -1,26 +1,34 @@
 <script setup lang="ts">
-defineProps<{
+import { isHttpLinkUrl } from '#shared/utils/link-url'
+
+const props = defineProps<{
   name?: string
 }>()
+
+const href = computed(() => {
+  if (!props.name)
+    return undefined
+
+  const address = `http://${props.name}`
+  if (!isHttpLinkUrl(address))
+    return undefined
+
+  const url = new URL(address)
+  return url.host === props.name.toLowerCase() ? url.href : undefined
+})
 </script>
 
 <template>
-  <a
-    :href="`http://${name}`"
-    target="_blank"
-    rel="noopener noreferrer"
+  <component
+    :is="href ? 'a' : 'span'"
+    :href="href"
+    :target="href ? '_blank' : undefined"
+    :rel="href ? 'noopener noreferrer' : undefined"
     class="flex w-full min-w-0 items-start gap-1"
   >
     <Avatar
       class="size-5 shrink-0 p-0.5"
     >
-      <AvatarImage
-        :src="`https://unavatar.webp.se/${name}?fallback=false`"
-        :alt="name"
-        loading="lazy"
-        width="20"
-        height="20"
-      />
       <AvatarFallback>
         <img
           src="/icon.png"
@@ -32,5 +40,5 @@ defineProps<{
       </AvatarFallback>
     </Avatar>
     <span class="min-w-0 break-all">{{ name }}</span>
-  </a>
+  </component>
 </template>

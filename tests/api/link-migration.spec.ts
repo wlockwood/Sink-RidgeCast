@@ -195,6 +195,18 @@ describe('/api/link/import', { concurrent: false }, () => {
     expect(storedLink?.password).toBe(exportedPassword)
   })
 
+  it('strips legacy password hints and rejects an unsupported hash cost', async () => {
+    const verifier = 'BwcHBwcHBwcHBwcHBwcHBw:Fq99s8_SgzK6gVdD4aLT2Tb3uOzIsyXVEhNmmAZTyMQ'
+    const good = { ...createLinkPayload(), password: `sink-pwd:v1:10000:${verifier}:YWJj` }
+    const unsupported = { ...createLinkPayload(), password: `sink-pwd:v1:100001:${verifier}:YWJj` }
+    const response = await postJson('/api/link/import', { version: '1.0', links: [good, unsupported] })
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ success: 1, failed: 1 })
+    expect((await getStoredLink(good.slug))?.password).toBe(`sink-pwd:v2:10000:${verifier}`)
+    expect(await getStoredLink(unsupported.slug)).toBeNull()
+  })
+
   it('returns 400 for invalid import data', async () => {
     const response = await postJson('/api/link/import', { invalid: 'data' })
     expect(response.status).toBe(400)

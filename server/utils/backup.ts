@@ -3,6 +3,7 @@
 import type { Link } from '#shared/schemas/link'
 import { readCompletedLinkMigrationMarker } from '../services/link-store/migration'
 import { createBackupJsonStream, uploadBackupParts } from './backup-json-stream'
+import { protectLinkPasswordForExport } from './link-password'
 import { iterateAllAuthoritativeLinks } from './link-store'
 
 export interface BackupData {
@@ -23,6 +24,11 @@ async function runCleanup(action: string, cleanup: () => Promise<unknown>): Prom
   catch (error) {
     console.warn(`[backup] Failed to ${action}`, error)
   }
+}
+
+async function* iterateProtectedLinks(env: Cloudflare.Env): AsyncIterable<Link> {
+  for await (const link of iterateAllAuthoritativeLinks(env))
+    yield await protectLinkPasswordForExport(link)
 }
 
 export async function backupLinksToR2(env: Cloudflare.Env, isManual: boolean = false): Promise<BackupResult> {
@@ -46,7 +52,7 @@ export async function backupLinksToR2(env: Cloudflare.Env, isManual: boolean = f
   const prefix = isManual ? 'manual-links-' : 'links-'
   const filename = `backups/${prefix}${timestamp}.json`
 
-  const backup = createBackupJsonStream(iterateAllAuthoritativeLinks(env), backupMetadata)
+  const backup = createBackupJsonStream(iterateProtectedLinks(env), backupMetadata)
   const stagingKey = `${filename}.pending-${crypto.randomUUID()}`
   const upload = await env.R2.createMultipartUpload(stagingKey, {
     httpMetadata: { contentType: 'application/json' },

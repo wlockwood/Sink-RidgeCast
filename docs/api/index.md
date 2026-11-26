@@ -5,15 +5,9 @@ description: OpenAPI docs, authentication, CORS, and endpoint index for Sink.
 
 # REST API
 
-## Interactive docs
+## OpenAPI document
 
-Every Sink instance publishes API docs at:
-
-- `https://your-domain/_docs/openapi.json` — machine-readable OpenAPI
-- `https://your-domain/_docs/scalar` — friendly UI
-- `https://your-domain/_docs/swagger` — classic Swagger UI
-
-Use your own domain. Public demo: [https://sink.cool/_docs/scalar](https://sink.cool/_docs/scalar).
+Every Sink instance publishes its OpenAPI document at `https://your-domain/_docs/openapi.json`. You can import the document into your API client. [Public demo OpenAPI document](https://sink.cool/_docs/openapi.json)
 
 ## Authentication
 
@@ -25,11 +19,31 @@ Authorization: Bearer YOUR_SITE_TOKEN
 
 (`Bearer` means “here is the token”.) It must match `NUXT_SITE_TOKEN` exactly (at least 8 characters). With [Cloudflare Access](/configuration/cloudflare-access) enabled, browsers can also authenticate with a verified Access login. The [MCP endpoint](/integrations/#mcp-server) at `/api/mcp` uses the same token.
 
+### Application-only link creation
+
+Create a token and add allowed destinations in **Dashboard → Settings → Application Links**. A server-side application can use the separate token to create links with random slugs. The request body accepts `url` and an optional `prefix`. See [token rotation and usage](/configuration/#application-only-link-creation).
+
+```http
+POST /api/link/shorten
+Authorization: Bearer YOUR_LINK_CREATE_TOKEN
+Content-Type: application/json
+
+{"url":"https://maps.example.com/share/123","prefix":"map-"}
+```
+
+The prefix can contain zero to five ASCII letters, digits, and single hyphens. Start a nonempty prefix with a letter or digit. For example, `map-` replaces the first four characters. Application slugs use at least 11 characters so even a five-character prefix leaves at least six random characters. Sink's case sensitivity setting applies to the result.
+
+On success, Sink returns HTTP `201` with `shortLink` and the created `link`. A missing or incorrect application token returns `401`, an invalid prefix or unsupported request field returns `400`, and a destination outside the allowlist returns `403`. Bodies larger than 192 KiB return `413`. A slug collision, allowlist change, or token rotation or revocation during creation returns `409`. A retry checks the current token and allowlist and generates a new slug. Links created here preserve the destination's query string and ignore query parameters added to the short link.
+
+The dashboard uses authenticated admin endpoints under `/api/link/application-tokens` to list credentials and read usage, create a token with `{ "name": "Maps" }`, rotate it with `POST /api/link/application-tokens/{id}/rotate` and the current `version`, and revoke it with `DELETE /api/link/application-tokens/{id}`. Create and rotate responses include the new `secret` and the token metadata. List responses include metadata and successful creation totals.
+
 ## CORS
 
 Optional. Set `NUXT_API_CORS=true` at build time to allow browser apps on other sites to call `/api/**`. Login is still required. See [configuration](/configuration/#optional).
 
 ## Before you call link APIs
+
+On Workers and Pages, Sink caps incoming request bodies at 16 MiB. Application shortening, allowlist updates, create token management, and image uploads have lower limits.
 
 ::: warning Storage must be ready
 Until you open **Dashboard → Links** once after deploy, most `/api/link/**` calls fail with **“storage not ready” (HTTP 423)**. See [storage setup](/storage/kv-to-d1).
@@ -44,14 +58,15 @@ Until you open **Dashboard → Links** once after deploy, most `/api/link/**` ca
 
 ## Endpoint groups
 
-Use the OpenAPI UI for full request/response details.
+Use the OpenAPI document for full request and response details.
 
-| Group         | Routes                                                                                       |
-| ------------- | -------------------------------------------------------------------------------------------- |
-| Links         | `/api/link/create`, `edit`, `upsert`, `delete`, `query`, `search`, `list`, `check`, `tags`   |
-| Import/export | `/api/link/import`, `/api/link/export` — [Import and Export](/features/import-export)        |
-| Storage setup | `/api/link/migration/status`, `/api/link/migration/run` — [storage setup](/storage/kv-to-d1) |
-| AI            | `/api/link/ai`, `/api/link/og-ai` — [Workers AI](/features/ai)                               |
-| Analytics     | `/api/stats/**`, `/api/logs/**` — [Analytics](/features/analytics)                           |
-| Utilities     | `/api/verify`, `/api/location`, `/api/upload/image`, `/api/backup`                           |
-| MCP           | `/api/mcp` — [MCP Server](/integrations/#mcp-server)                                         |
+| Group             | Routes                                                                                       |
+| ----------------- | -------------------------------------------------------------------------------------------- |
+| Links             | `/api/link/create`, `edit`, `upsert`, `delete`, `query`, `search`, `list`, `check`, `tags`   |
+| Application links | `POST /api/link/shorten`                                                                     |
+| Import/export     | `/api/link/import`, `/api/link/export` — [Import and Export](/features/import-export)        |
+| Storage setup     | `/api/link/migration/status`, `/api/link/migration/run` — [storage setup](/storage/kv-to-d1) |
+| AI                | `/api/link/ai`, `/api/link/og-ai` — [Workers AI](/features/ai)                               |
+| Analytics         | `/api/stats/**`, `/api/logs/**` — [Analytics](/features/analytics)                           |
+| Utilities         | `/api/verify`, `/api/location`, `/api/upload/image`, `/api/backup`                           |
+| MCP               | `/api/mcp` — [MCP Server](/integrations/#mcp-server)                                         |

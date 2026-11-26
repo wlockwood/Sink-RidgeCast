@@ -10,10 +10,8 @@ description: Sink 的 OpenAPI 文档、身份认证、CORS 与端点索引。
 每个 Sink 实例都会发布 API 文档：
 
 - `https://your-domain/_docs/openapi.json` — 机器可读的 OpenAPI
-- `https://your-domain/_docs/scalar` — 更友好的界面
-- `https://your-domain/_docs/swagger` — 经典 Swagger 界面
 
-请用你自己的域名。公开演示：[https://sink.cool/_docs/scalar](https://sink.cool/_docs/scalar)。
+请用你自己的域名。公开演示：[https://sink.cool/_docs/openapi.json](https://sink.cool/_docs/openapi.json)。
 
 ## 身份认证
 

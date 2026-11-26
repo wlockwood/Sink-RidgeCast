@@ -6,6 +6,10 @@ defineRouteMeta({
 })
 
 export default eventHandler(async (event) => {
+  if (useRuntimeConfig(event).public.previewMode) {
+    setResponseStatus(event, 403, 'Preview mode cannot back up links.')
+    return { success: false, message: 'Preview mode cannot back up links.' }
+  }
   const env = event.context.cloudflare.env
   const result = await backupLinksToR2(env, true)
   if (!result.completed && result.reason === 'migration-incomplete')

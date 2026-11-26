@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { LinkCheckResult } from '@/types'
 import { CircleCheck, CircleX, ExternalLink, WifiOff } from '@lucide/vue'
+import { isHttpLinkUrl } from '#shared/utils/link-url'
 
 defineProps<{
   results: LinkCheckResult[]
@@ -95,6 +96,7 @@ function resultVariant(result: LinkCheckResult): 'default' | 'secondary' | 'dest
               class="flex justify-end gap-2"
             >
               <Button
+                v-if="isHttpLinkUrl(result.url)"
                 as="a"
                 variant="outline"
                 size="sm"

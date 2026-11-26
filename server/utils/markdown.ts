@@ -1,5 +1,6 @@
 import type { H3Event } from 'h3'
 import { getHeader } from 'h3'
+import { fetchPublicHttp } from './public-http'
 
 const MAX_RESPONSE_BYTES = 256 * 1024
 const MAX_MARKDOWN_LENGTH = 4096
@@ -40,10 +41,6 @@ export async function fetchPageMarkdown(event: H3Event, url: string, AI: Ai): Pr
   const timeout = setTimeout(() => controller.abort(), 5000)
 
   try {
-    const target = new URL(url)
-    if (target.protocol !== 'http:' && target.protocol !== 'https:')
-      return null
-
     const headers = new Headers({
       Accept: 'text/markdown, text/html;q=0.9, */*;q=0.8',
     })
@@ -51,9 +48,11 @@ export async function fetchPageMarkdown(event: H3Event, url: string, AI: Ai): Pr
     if (acceptLanguage)
       headers.set('Accept-Language', acceptLanguage)
 
-    const response = await fetch(target, { headers, signal: controller.signal })
-    if (!response.ok)
+    const response = await fetchPublicHttp(url, headers, controller.signal)
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => undefined)
       throw new Error(`HTTP ${response.status}`)
+    }
 
     const contentType = response.headers.get('content-type') || ''
     const body = await readLimitedBody(response)
@@ -76,12 +75,12 @@ export async function fetchPageMarkdown(event: H3Event, url: string, AI: Ai): Pr
         }
       }
       catch (err) {
-        console.warn(`[markdown] AI.toMarkdown() failed for ${url}:`, err)
+        console.warn('[markdown] AI.toMarkdown() failed:', err instanceof Error ? err.name : 'Unknown error')
       }
     }
   }
   catch (err) {
-    console.warn(`[markdown] Failed to fetch ${url}:`, err)
+    console.warn('[markdown] Failed to fetch page:', err instanceof Error ? err.name : 'Unknown error')
   }
   finally {
     clearTimeout(timeout)

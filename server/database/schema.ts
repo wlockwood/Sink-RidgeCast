@@ -47,6 +47,24 @@ export const linkTombstones = sqliteTable('link_tombstones', {
   deletedAt: integer('deleted_at').notNull(),
 })
 
+export const applicationLinkSettings = sqliteTable('application_link_settings', {
+  id: integer().primaryKey(),
+  allowedUrls: text('allowed_urls', { mode: 'json' }).$type<string[]>().notNull(),
+  revision: integer().notNull().default(1),
+})
+
+export const applicationLinkTokens = sqliteTable('application_link_tokens', {
+  id: text().primaryKey(),
+  name: text().notNull(),
+  tokenHash: text('token_hash').unique(),
+  version: integer().notNull().default(1),
+  createdAt: integer('created_at'),
+  rotatedAt: integer('rotated_at'),
+  revokedAt: integer('revoked_at'),
+  lastUsedAt: integer('last_used_at'),
+  linksCreated: integer('links_created').notNull().default(0),
+})
+
 export const linkMigrationRuns = sqliteTable('link_migration_runs', {
   id: text().primaryKey(),
   expectedCursor: text('expected_cursor'),

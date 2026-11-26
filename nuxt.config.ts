@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import process from 'node:process'
+import { fileURLToPath } from 'node:url'
 import tailwindcss from '@tailwindcss/vite'
 import { currentLocales } from './i18n/i18n'
 
@@ -16,6 +17,7 @@ export default defineNuxtConfig({
   css: ['@/assets/css/tailwind.css'],
   runtimeConfig: {
     siteToken: process.env.NUXT_SITE_TOKEN || randomBytes(32).toString('base64url'),
+    linkCreateToken: '',
     cfAccessTeamDomain: '',
     cfAccessAud: '',
     redirectStatusCode: '301',
@@ -59,6 +61,8 @@ export default defineNuxtConfig({
     '/_docs/**': {
       headers: { 'X-Robots-Tag': 'noindex, follow' },
     },
+    '/_docs/scalar': { redirect: '/_docs/openapi.json' },
+    '/_docs/swagger': { redirect: '/_docs/openapi.json' },
     '/sphere.bin': {
       headers: { 'Cache-Control': 'public, max-age=0, must-revalidate' },
     },
@@ -82,6 +86,15 @@ export default defineNuxtConfig({
   compatibilityDate: '2026-07-13',
   nitro: {
     preset: import.meta.env.CF_PAGES !== '1' ? 'cloudflare-module' : undefined,
+    hooks: {
+      'build:before': function (nitro) {
+        if (nitro.options.dev || !['cloudflare-module', 'cloudflare-pages'].includes(nitro.options.preset))
+          return
+
+        nitro.options.alias['#sink-cloudflare-runtime'] = nitro.options.entry
+        nitro.options.entry = fileURLToPath(new URL('./server/runtime/cloudflare-entry.ts', import.meta.url))
+      },
+    },
     experimental: {
       openAPI: true,
     },
@@ -94,12 +107,8 @@ export default defineNuxtConfig({
       },
       route: '/_docs/openapi.json',
       ui: {
-        scalar: {
-          route: '/_docs/scalar',
-        },
-        swagger: {
-          route: '/_docs/swagger',
-        },
+        scalar: false,
+        swagger: false,
       },
     },
   },

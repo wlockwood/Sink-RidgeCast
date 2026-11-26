@@ -22,6 +22,12 @@ function jsonBodySchema(spec: JsonObject, path: string, method: string) {
 }
 
 describe('/_docs/openapi.json', () => {
+  it.each(['scalar', 'swagger'])('redirects the legacy %s viewer to the OpenAPI document', async (viewer) => {
+    const response = await fetch(`/_docs/${viewer}`, { redirect: 'manual' })
+    expect(response.status).toBe(307)
+    expect(response.headers.get('Location')).toBe('/_docs/openapi.json')
+  })
+
   it('injects request body schemas into the link routes', async () => {
     const spec = await getOpenApiSpec()
 
@@ -52,6 +58,24 @@ describe('/_docs/openapi.json', () => {
     expect(createLink?.properties?.slug?.default).toBeUndefined()
     expect(createLink?.properties?.createdAt?.default).toBeUndefined()
     expect(createLink?.properties?.updatedAt?.default).toBeUndefined()
+  })
+
+  it('documents the restricted application token and shortening payload', async () => {
+    const spec = await getOpenApiSpec()
+    const shortenLink = spec.components?.schemas?.ShortenLink
+    expect(shortenLink?.required).toEqual(['url'])
+    expect(shortenLink?.properties?.prefix?.maxLength).toBe(5)
+    expect(shortenLink?.properties?.prefix?.pattern).toBeTruthy()
+    expect('RC-').toMatch(new RegExp(shortenLink.properties.prefix.pattern))
+    expect(shortenLink?.additionalProperties).toBe(false)
+    expect(jsonBodySchema(spec, '/api/link/shorten', 'post')).toEqual({ $ref: '#/components/schemas/ShortenLink' })
+    expect(spec.components?.securitySchemes?.linkCreateBearer?.description).toContain('NUXT_LINK_CREATE_TOKEN')
+    expect(spec.paths?.['/api/link/shorten']?.post?.security).toEqual([{ linkCreateBearer: [] }])
+    const created = spec.paths?.['/api/link/shorten']?.post?.responses?.['201']?.content?.['application/json']?.schema
+    expect(created?.required).toEqual(expect.arrayContaining(['shortLink', 'link']))
+    expect(spec.paths?.['/api/link/application-settings']?.put?.security).toEqual([{ bearerAuth: [] }])
+    expect(jsonBodySchema(spec, '/api/link/application-tokens', 'post')).toEqual({ $ref: '#/components/schemas/CreateApplicationToken' })
+    expect(jsonBodySchema(spec, '/api/link/application-tokens/{id}/rotate', 'post')).toEqual({ $ref: '#/components/schemas/RotateApplicationToken' })
   })
 
   it('documents EditLink with a clearable password', async () => {

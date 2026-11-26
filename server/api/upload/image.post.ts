@@ -25,13 +25,21 @@ defineRouteMeta({
 })
 
 export default eventHandler(async (event) => {
+  assertLinkWritesAllowed(event, 'upload images')
   const R2 = requireR2Bucket(event.context.cloudflare.env)
 
-  const formData = await readFormData(event)
-  const file = formData.get('file') as File | null
-  const slug = formData.get('slug') as string | null
+  const contentType = getHeader(event, 'Content-Type')
+  if (!contentType || !/^multipart\/form-data(?:\s*;|$)/i.test(contentType))
+    throw createError({ status: 400, statusText: 'Expected multipart form data' })
 
-  if (!file) {
+  const body = await readBoundedRequestBody(event, IMAGE_MAX_SIZE + 64 * 1024)
+  const formData = await new Response(body, { headers: { 'Content-Type': contentType } }).formData().catch(() => {
+    throw createError({ status: 400, statusText: 'Invalid multipart form data' })
+  })
+  const file = formData.get('file')
+  const slug = formData.get('slug')
+
+  if (!file || typeof file === 'string') {
     throw createError({ status: 400, statusText: 'File is required' })
   }
 
@@ -52,10 +60,13 @@ export default eventHandler(async (event) => {
     throw createError({ status: 400, statusText: 'File size exceeds 5MB limit' })
   }
 
-  const ext = file.type.split('/')[1]
-  const key = `images/${slug}/${nanoid(10)()}.${ext}`
-
   const arrayBuffer = await file.arrayBuffer()
+  if (detectRasterImageContentType(new Uint8Array(arrayBuffer)) !== file.type)
+    throw createError({ status: 400, statusText: 'File data does not match the declared image type' })
+
+  const ext = file.type.split('/')[1]
+  const key = `images/${slugResult.data}/${nanoid(10)()}.${ext}`
+
   await R2.put(key, arrayBuffer, {
     httpMetadata: {
       contentType: file.type,

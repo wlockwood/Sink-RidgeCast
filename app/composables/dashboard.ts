@@ -1,5 +1,5 @@
 import type { Component } from 'vue'
-import { Activity, ChartArea, FolderSync, Link, ScanSearch } from '@lucide/vue'
+import { Activity, ChartArea, FolderSync, Link, ScanSearch, ShieldCheck } from '@lucide/vue'
 import { computed } from 'vue'
 import { useRoute } from '#imports'
 
@@ -34,6 +34,11 @@ export const DASHBOARD_ROUTES = {
     paths: ['/dashboard/check'],
     titleKey: 'nav.check',
     icon: ScanSearch,
+  },
+  applicationLinks: {
+    paths: ['/dashboard/application-links'],
+    titleKey: 'links.application.title',
+    icon: ShieldCheck,
   },
   migrate: {
     paths: ['/dashboard/migrate'],

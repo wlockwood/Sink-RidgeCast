@@ -109,6 +109,21 @@ Click analytics store the target URL in Workers Analytics Engine, which limits a
 
 Safe browsing example: Cloudflare Family DNS `https://family.cloudflare-dns.com/dns-query`. See also [Link Features](/features/links).
 
+### Application-only link creation
+
+Open **Dashboard → Settings → Application Links** to create a named token for each application. Copy the secret into the application when you create or rotate the token. Sink stores a hash of each secret and displays the secret only once. Each token grants access to [`POST /api/link/shorten`](/api/#application-only-link-creation).
+
+The dashboard shows how many links each token has successfully created and when it last created one. Select **Refresh usage** to get the latest figures. Rotation invalidates the old secret immediately and keeps the usage totals under the same token name. Revocation immediately disables future requests and retains the token's usage history and existing links.
+
+An existing `NUXT_LINK_CREATE_TOKEN` runtime secret continues to work and is listed as active when valid. To switch an application to a managed token, create one, update the application, then revoke `NUXT_LINK_CREATE_TOKEN` in the dashboard. The revocation persists across deployments. Use distinct values for the environment token and `NUXT_SITE_TOKEN`. A configured Cloudflare Access sign-in can still reach the dashboard if the runtime secrets match. Use a separate dashboard secret outside the reserved managed-token format (`sink_ct_` followed by 64 lowercase hexadecimal characters).
+
+In **Allowed URLs**, enter one HTTPS destination per line. The rules apply to all create tokens.
+
+- `https://maps.example.com/share/` allows `https://maps.example.com/share/123` and other paths under `/share/` on that origin.
+- `https://www.example.com/map` allows that exact path, including URLs with a query or fragment.
+
+An origin without a path allows every path on that origin. A path without a trailing slash matches that exact path. The host and port must match the entry. Enter rules without credentials, queries, or fragments. Choose destinations that cannot themselves redirect users to arbitrary sites. Saving an empty list blocks new application links. If another session saves changes while you are editing, reload the saved list before submitting again. Manage existing short links under **Links**.
+
 ### Expired link retention
 
 Set runtime variable `NUXT_EXPIRED_LINK_RETENTION_DAYS=30` to permanently delete D1 links once they have been expired for 30 days. Unset or empty disables cleanup. Only non-negative integers are accepted; `0` deletes expired links on the next run. Invalid values skip cleanup and log a warning.
@@ -120,7 +135,7 @@ Cleanup requires a completed KV-to-D1 migration and Workers cron (daily at **00:
 | Variable                      | Default                      | Purpose                                                                                                      |
 | ----------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | `NUXT_REDIRECT_STATUS_CODE`   | `301`                        | Normal redirect code (`302` / `307` / `308` also work). Unknown-slug redirects stay 302                      |
-| `NUXT_LINK_CACHE_TTL`         | `60`                         | How long KV caches a link (seconds)                                                                          |
+| `NUXT_LINK_CACHE_TTL`         | `60`                         | KV read cache lifetime for legacy links before D1 migration, in seconds                                      |
 | `NUXT_REDIRECT_WITH_QUERY`    | `false`                      | `true` appends visitor query params to the target URL                                                        |
 | `NUXT_REDIRECT_NO_STORE`      | `false`                      | `true` asks browsers not to cache the redirect                                                               |
 | `NUXT_CASE_SENSITIVE`         | `false`                      | `true` keeps custom short-code case (`Docs` ≠ `docs`)                                                        |

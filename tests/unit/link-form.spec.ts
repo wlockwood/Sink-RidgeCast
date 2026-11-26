@@ -8,6 +8,7 @@ import {
 import { LINK_PASSWORD_MASK_PREFIX } from '../../shared/utils/link-password'
 
 vi.mock('#shared/utils/link-password', async () => import('../../shared/utils/link-password'))
+vi.mock('#shared/utils/link-url', async () => import('../../shared/utils/link-url'))
 
 describe('link form values', () => {
   it('creates the current defaults for a new link', () => {

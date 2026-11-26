@@ -1,7 +1,8 @@
 import type { Link } from '#shared/schemas/link'
-import { isHashedLinkPassword, isMaskedLinkPassword, LINK_PASSWORD_HASH_PREFIX, maskLinkPassword } from '#shared/utils/link-password'
+import { createError } from 'h3'
+import { isHashedLinkPassword, isMaskedLinkPassword, LEGACY_LINK_PASSWORD_HASH_PREFIX, LINK_PASSWORD_HASH_PREFIX, LINK_PASSWORD_MASK } from '#shared/utils/link-password'
 
-const LINK_PASSWORD_ITERATIONS = 10_000
+const LINK_PASSWORD_ITERATIONS = 100_000
 const LINK_PASSWORD_SALT_BYTES = 16
 const LINK_PASSWORD_HASH_BITS = 256
 
@@ -60,14 +61,20 @@ async function deriveLinkPasswordHash(password: string, salt: Uint8Array, iterat
 }
 
 function parseStoredLinkPassword(password: string): StoredLinkPassword | undefined {
-  if (!isHashedLinkPassword(password))
+  const legacy = password.startsWith(LEGACY_LINK_PASSWORD_HASH_PREFIX)
+  const prefix = legacy ? LEGACY_LINK_PASSWORD_HASH_PREFIX : LINK_PASSWORD_HASH_PREFIX
+  if (!password.startsWith(prefix))
     return undefined
 
-  const [iterationsValue, saltValue, hashValue, tailValue] = password.slice(LINK_PASSWORD_HASH_PREFIX.length).split(':')
+  const parts = password.slice(prefix.length).split(':')
+  const [iterationsValue, saltValue = '', hashValue = ''] = parts
   const iterations = Number(iterationsValue)
 
-  if (!Number.isSafeInteger(iterations) || iterations < 1 || !saltValue || !hashValue || !tailValue)
+  if (parts.length !== (legacy ? 4 : 3) || !Number.isSafeInteger(iterations)
+    || iterations < 1 || iterations > LINK_PASSWORD_ITERATIONS
+    || !/^[\w-]{22}$/.test(saltValue) || !/^[\w-]{43}$/.test(hashValue)) {
     return undefined
+  }
 
   try {
     return {
@@ -79,6 +86,10 @@ function parseStoredLinkPassword(password: string): StoredLinkPassword | undefin
   catch {
     return undefined
   }
+}
+
+function serializeLinkPassword({ iterations, salt, hash }: StoredLinkPassword): string {
+  return `${LINK_PASSWORD_HASH_PREFIX}${iterations}:${bytesToBase64Url(salt)}:${bytesToBase64Url(hash)}`
 }
 
 function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
@@ -95,25 +106,30 @@ function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
 export async function hashLinkPassword(password: string): Promise<string> {
   const salt = crypto.getRandomValues(new Uint8Array(LINK_PASSWORD_SALT_BYTES))
   const hash = await deriveLinkPasswordHash(password, salt, LINK_PASSWORD_ITERATIONS)
-  const tail = bytesToBase64Url(encodeText([...password].slice(-3).join('')))
-
-  return `${LINK_PASSWORD_HASH_PREFIX}${LINK_PASSWORD_ITERATIONS}:${bytesToBase64Url(salt)}:${bytesToBase64Url(hash)}:${tail}`
+  return serializeLinkPassword({ iterations: LINK_PASSWORD_ITERATIONS, salt, hash })
 }
 
 export async function normalizeLinkPasswordForStorage(password: string): Promise<string> {
   if (isMaskedLinkPassword(password))
-    throw new Error('Masked password cannot be stored')
+    throw createError({ status: 400, statusText: 'Masked password cannot be stored' })
 
-  if (parseStoredLinkPassword(password))
-    return password
+  if (isHashedLinkPassword(password)) {
+    const parsed = parseStoredLinkPassword(password)
+    if (!parsed)
+      throw createError({ status: 400, statusText: 'Invalid link password verifier' })
+    return serializeLinkPassword(parsed)
+  }
 
   return await hashLinkPassword(password)
 }
 
 export async function verifyLinkPassword(input: string, stored: string): Promise<boolean> {
+  if (!input || input.length > 128)
+    return false
+
   const parsed = parseStoredLinkPassword(stored)
   if (!parsed)
-    return input === stored
+    return !isHashedLinkPassword(stored) && timingSafeEqual(encodeText(input), encodeText(stored))
 
   const inputHash = await deriveLinkPasswordHash(input, parsed.salt, parsed.iterations)
   return timingSafeEqual(inputHash, parsed.hash)
@@ -125,7 +141,7 @@ export function sanitizeLinkPassword<T extends { password?: string } | null>(lin
 
   return {
     ...link,
-    password: maskLinkPassword(link.password),
+    password: LINK_PASSWORD_MASK,
   }
 }
 

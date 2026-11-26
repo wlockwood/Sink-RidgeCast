@@ -1,4 +1,5 @@
 import type { H3Event } from 'h3'
+import type { ApplicationLinkWritePolicy } from '#shared/schemas/application-link-token'
 import type { EditLink, Link } from '#shared/schemas/link'
 
 const editableOptionalLinkFields = [
@@ -89,12 +90,16 @@ async function applyEditableLinkPassword(newLink: Link, password?: string): Prom
     newLink.password = await normalizeLinkPasswordForStorage(newLink.password)
 }
 
-export async function saveNewLink(event: H3Event, link: Link): Promise<LinkResponse> {
+export async function saveNewLink(event: H3Event, link: Link, applicationPolicy?: ApplicationLinkWritePolicy): Promise<LinkResponse> {
   await prepareIncomingLink(event, link)
   await hashNewLinkPassword(link)
 
-  if (!await createLink(event, link))
-    throw createError({ status: 409, statusText: 'Link already exists' })
+  if (!await createLink(event, link, applicationPolicy)) {
+    const statusText = applicationPolicy
+      ? 'Application link authorization or settings changed, or slug already exists'
+      : 'Link already exists'
+    throw createError({ status: 409, statusText })
+  }
 
   return buildLinkResponse(event, link)
 }

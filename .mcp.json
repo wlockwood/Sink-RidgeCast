@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "shadcn-vue": {
-      "command": "npx",
-      "args": ["shadcn-vue@latest", "mcp"]
+      "command": "pnpm",
+      "args": ["exec", "shadcn-vue", "mcp"]
     },
     "nuxt": {
       "type": "http",

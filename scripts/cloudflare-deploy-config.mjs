@@ -78,13 +78,16 @@ kv.id = env.DEPLOY_KV_NAMESPACE_ID
 kv.preview_id = env.DEPLOY_KV_PREVIEW_NAMESPACE_ID ?? env.DEPLOY_KV_NAMESPACE_ID
 analytics.dataset = env.DEPLOY_ANALYTICS_DATASET
 
+const r2Buckets = config.r2_buckets?.filter(({ binding }) => binding !== 'R2') ?? []
 if (env.DEPLOY_R2_BUCKET_NAME) {
-  const r2 = getBinding(config, 'r2_buckets', 'R2')
-  r2.bucket_name = env.DEPLOY_R2_BUCKET_NAME
-  r2.preview_bucket_name = env.DEPLOY_R2_PREVIEW_BUCKET_NAME ?? env.DEPLOY_R2_BUCKET_NAME
+  r2Buckets.push({
+    ...config.r2_buckets?.find(({ binding }) => binding === 'R2'),
+    binding: 'R2',
+    bucket_name: env.DEPLOY_R2_BUCKET_NAME,
+    preview_bucket_name: env.DEPLOY_R2_PREVIEW_BUCKET_NAME ?? env.DEPLOY_R2_BUCKET_NAME,
+  })
 }
-else {
-  config.r2_buckets = config.r2_buckets.filter(({ binding }) => binding !== 'R2')
-}
+if (r2Buckets.length || config.r2_buckets)
+  config.r2_buckets = r2Buckets
 
 await writeFile(outputPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8')

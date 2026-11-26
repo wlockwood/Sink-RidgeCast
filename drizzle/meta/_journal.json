@@ -43,6 +43,34 @@
       "when": 1789995773114,
       "tag": "0005_tan_karma",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1795719136871,
+      "tag": "0006_application_link_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1795720268738,
+      "tag": "0007_application_link_settings_revision",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1795721123724,
+      "tag": "0008_strip_legacy_password_suffix",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1795723007626,
+      "tag": "0009_application_link_tokens",
+      "breakpoints": true
     }
   ]
 }

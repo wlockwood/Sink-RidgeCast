@@ -5,6 +5,7 @@ import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import { links, linkTags, tags } from '../../server/database/schema'
 import { createBackupJsonStream, uploadBackupParts } from '../../server/utils/backup-json-stream'
+import { LINK_PASSWORD_HASH_PREFIX } from '../../shared/utils/link-password'
 import { clearLinkMigrationState, db, deleteStoredLinks, postJson, runScheduledTasks, setLinkStoreD1Mode } from '../utils'
 
 function getManualBackupDate(key: string) {
@@ -19,6 +20,27 @@ describe('/api/backup', { concurrent: false }, () => {
   it('returns 401 without auth', async () => {
     const response = await postJson('/api/backup', {}, false)
     expect(response.status).toBe(401)
+  })
+
+  it('blocks manual and scheduled backups in preview mode', async () => {
+    await setLinkStoreD1Mode()
+    const runtimeEnv = env as unknown as { NUXT_PUBLIC_PREVIEW_MODE?: string }
+    const previousMode = runtimeEnv.NUXT_PUBLIC_PREVIEW_MODE
+    runtimeEnv.NUXT_PUBLIC_PREVIEW_MODE = 'true'
+
+    try {
+      const before = (await env.R2.list({ prefix: 'backups/' })).objects.map(object => object.key)
+      await runScheduledTasks()
+      expect((await postJson('/api/backup', {})).status).toBe(403)
+      expect((await env.R2.list({ prefix: 'backups/' })).objects.map(object => object.key)).toEqual(before)
+    }
+    finally {
+      if (previousMode === undefined)
+        delete runtimeEnv.NUXT_PUBLIC_PREVIEW_MODE
+      else
+        runtimeEnv.NUXT_PUBLIC_PREVIEW_MODE = previousMode
+      await clearLinkMigrationState()
+    }
   })
 
   it('skips scheduled backups and locks manual backups before migration', async () => {
@@ -52,7 +74,7 @@ describe('/api/backup', { concurrent: false }, () => {
     try {
       await setLinkStoreD1Mode()
       await db.batch([
-        db.insert(links).values({ slug: slugs.active, id: crypto.randomUUID(), url: 'https://example.com/active', createdAt: now, updatedAt: now, normalizedUrl: 'https://example.com/active', effectiveExpiresAt: null }),
+        db.insert(links).values({ slug: slugs.active, id: crypto.randomUUID(), url: 'https://example.com/active', createdAt: now, updatedAt: now, normalizedUrl: 'https://example.com/active', effectiveExpiresAt: null, password: 'legacy-test-password' }),
         db.insert(links).values({ slug: slugs.expired, id: crypto.randomUUID(), url: 'https://example.com/expired', createdAt: now, updatedAt: now, normalizedUrl: 'https://example.com/expired', effectiveExpiresAt: now - 60 }),
         db.insert(tags).values({ name: tag }),
         db.insert(linkTags).values({ linkSlug: slugs.active, tagName: tag }),
@@ -105,6 +127,7 @@ describe('/api/backup', { concurrent: false }, () => {
       ] satisfies Partial<Link>[]))
       expect(backupData?.links.filter(link => link.slug.startsWith(pagePrefix)).map(link => link.slug)).toEqual(pageSlugs)
       expect(backupData?.links.some(link => link.slug === slugs.legacy)).toBe(false)
+      expect(backupData?.links.find(link => link.slug === slugs.active)?.password).toMatch(new RegExp(`^${LINK_PASSWORD_HASH_PREFIX}`))
     }
     finally {
       if (backupKey)

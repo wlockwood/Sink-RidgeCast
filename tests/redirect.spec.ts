@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:workers'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import { deleteStoredLinks, fetch, postJson, setLinkStoreD1Mode } from './utils'
+import { links } from '../server/database/schema'
+import { db, deleteStoredLinks, fetch, postJson, setLinkStoreD1Mode } from './utils'
 
 type CfRequestInit = RequestInit & { cf?: { country?: string } }
 type UpstreamHandler = (init: RequestInit | undefined) => Response | Promise<Response>
@@ -231,6 +232,90 @@ describe('/', () => {
     expect(upstreamCalls('upstream.test').length).toBe(1)
   })
 
+  it('rejects a stored non-web destination at public resolution', async () => {
+    const slug = `legacy-url-${crypto.randomUUID()}`
+    const url = 'mailto:support@example.test'
+    const now = Math.floor(Date.now() / 1000)
+    await db.insert(links).values({ slug, id: 'legacy-scheme', url, normalizedUrl: url, createdAt: now, updatedAt: now, cloaking: true })
+    createdSlugs.push(slug)
+
+    const response = await fetch(`/${slug}`, { redirect: 'manual' })
+    expect(response.status).toBe(404)
+    expect(response.headers.has('location')).toBe(false)
+  })
+
+  it('follows a same-origin upstream redirect using a manual fetch for every hop', async () => {
+    mockUpstream({
+      'local-hop.test': (init) => {
+        if (upstreamCalls('local-hop.test').length === 1)
+          return new Response(null, { status: 302, headers: { Location: '/final' } })
+        return new Response(upstreamHeaders(init).authorization)
+      },
+    })
+    const slug = await createProxyLink('https://local-hop.test/initial')
+
+    const response = await fetch(`/${slug}`, { redirect: 'manual', headers: { Authorization: 'Bearer sample-upstream-key' } })
+    expect(response.status).toBe(200)
+    expect(await response.text()).toBe('Bearer sample-upstream-key')
+    const calls = upstreamCalls('local-hop.test')
+    expect(calls).toHaveLength(2)
+    expect(String(calls[1]?.[0])).toBe('https://local-hop.test/final')
+    expect(calls.every(([, init]) => init?.redirect === 'manual')).toBe(true)
+  })
+
+  it.each(['credentials', 'body'] as const)('stops an upstream cross-origin redirect carrying %s', async (privateInput) => {
+    mockUpstream({
+      'first-hop.test': () => new Response(null, { status: 303, headers: { Location: 'https://other-hop.test/next' } }),
+    })
+    const slug = await createProxyLink('https://first-hop.test/initial')
+    const init: RequestInit = privateInput === 'body'
+      ? { method: 'POST', body: 'sample' }
+      : { headers: { Authorization: 'Bearer sample-upstream-key' } }
+
+    const response = await fetch(`/${slug}`, { ...init, redirect: 'manual' })
+    expect(response.status).toBe(502)
+    expect(upstreamCalls('first-hop.test')).toHaveLength(1)
+    expect(upstreamCalls('other-hop.test')).toHaveLength(0)
+  })
+
+  it('follows public cross-origin hops with ordinary request headers only', async () => {
+    mockUpstream({
+      'public-hop.test': () => new Response(null, { status: 302, headers: { Location: 'https://public-end.test/destination' } }),
+      'public-end.test': init => new Response(JSON.stringify(upstreamHeaders(init))),
+    })
+    const slug = await createProxyLink('https://public-hop.test/start')
+
+    const response = await fetch(`/${slug}`, { redirect: 'manual', headers: { Accept: 'text/plain', Referer: 'https://example.test/' } })
+    expect(response.status).toBe(200)
+    const headers = await response.json()
+    expect(headers).toHaveProperty('accept', 'text/plain')
+    expect(headers).not.toHaveProperty('referer')
+    expect(headers).not.toHaveProperty('x-forwarded-host')
+    expect(upstreamCalls('public-end.test')).toHaveLength(1)
+  })
+
+  it('rejects a non-web redirect target without fetching it', async () => {
+    mockUpstream({
+      'scheme-hop.test': () => new Response(null, { status: 302, headers: { Location: 'mailto:support@example.test' } }),
+    })
+    const slug = await createProxyLink('https://scheme-hop.test/start')
+
+    const response = await fetch(`/${slug}`, { redirect: 'manual' })
+    expect(response.status).toBe(502)
+    expect(fetchSpy?.mock.calls).toHaveLength(1)
+  })
+
+  it('stops following a looping upstream redirect', async () => {
+    mockUpstream({
+      'loop-hop.test': () => new Response(null, { status: 302, headers: { Location: '/start' } }),
+    })
+    const slug = await createProxyLink('https://loop-hop.test/start')
+
+    const response = await fetch(`/${slug}`, { redirect: 'manual' })
+    expect(response.status).toBe(502)
+    expect(upstreamCalls('loop-hop.test')).toHaveLength(6)
+  })
+
   it('serves OG HTML to social bots instead of proxying', async () => {
     mockUpstream({
       'og-proxy.test': () => new Response('must not be fetched'),
@@ -285,7 +370,11 @@ describe('/', () => {
   it('does not forward credential headers to the proxy target', async () => {
     mockUpstream({
       'headers.test': init => new Response(JSON.stringify({ headers: upstreamHeaders(init) }), {
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Connection': 'X-Hop-Response',
+          'X-Hop-Response': 'upstream-only',
+        },
       }),
     })
     const slug = await createProxyLink('https://headers.test/headers')
@@ -295,10 +384,14 @@ describe('/', () => {
       headers: {
         'Authorization': 'Bearer api-token',
         'Cookie': 'session=secret',
+        'Connection': 'X-Hop-Request',
+        'Forwarded': 'for=192.0.2.1',
         'X-Link-Password': 'link-secret',
         'X-Forwarded-For': '1.2.3.4',
+        'True-Client-IP': '192.0.2.1',
         'X-Real-Ip': '5.6.7.8',
         'CF-Ray': 'abcdef-SJC',
+        'X-Hop-Request': 'local-only',
         'X-Custom-Header': 'custom-value',
         'User-Agent': 'SinkProxyTest/1.0',
       },
@@ -314,9 +407,11 @@ describe('/', () => {
     expect(echoedNames).not.toContain('x-link-password')
     expect(echoedNames).not.toContain('x-real-ip')
     expect(echoedNames).not.toContain('cf-ray')
-    // Without a trusted cf-connecting-ip the client's value is passed through;
-    // on Cloudflare it is replaced by the real connecting IP.
-    expect(echoed['x-forwarded-for']).toBe('1.2.3.4')
+    expect(echoedNames).not.toContain('forwarded')
+    expect(echoedNames).not.toContain('true-client-ip')
+    expect(echoedNames).not.toContain('x-forwarded-for')
+    expect(echoedNames).not.toContain('x-hop-request')
+    expect(response.headers.has('x-hop-response')).toBe(false)
     expect(echoed['x-custom-header']).toBe('custom-value')
     expect(echoed['user-agent']).toBe('SinkProxyTest/1.0')
   })
@@ -445,6 +540,55 @@ describe('/', () => {
 })
 
 describe('password protected redirect', { concurrent: false }, () => {
+  it.each([['307', 'Mozilla/5.0'], ['308', 'Mozilla/5.0 (iPhone)']])('uses 303 for confirmed browser forms with configured %s', async (status, userAgent) => {
+    const slug = `password-status-${crypto.randomUUID()}`
+    const url = 'https://example.test/regular'
+    const apple = 'https://example.test/device'
+    const password = 'sample-link-password'
+    expect((await postJson('/api/link/create', { url, apple, slug, password })).status).toBe(201)
+    createdSlugs.push(slug)
+
+    const previous = env.NUXT_REDIRECT_STATUS_CODE
+    env.NUXT_REDIRECT_STATUS_CODE = status
+    try {
+      const headers = { 'User-Agent': userAgent }
+      const response = await fetch(`/${slug}`, {
+        method: 'POST',
+        redirect: 'manual',
+        headers,
+        body: new URLSearchParams({ password }),
+      })
+      expect(response.status).toBe(303)
+      expect(response.headers.get('location')).toBe(userAgent.includes('iPhone') ? apple : url)
+      expect(response.headers.get('cache-control')).toBe('private, no-store')
+
+      const headerResponse = await fetch(`/${slug}`, {
+        redirect: 'manual',
+        headers: { ...headers, 'X-Link-Password': password },
+      })
+      expect(headerResponse.status).toBe(Number(status))
+      expect(headerResponse.headers.get('cache-control')).toBe('private, no-store')
+    }
+    finally {
+      if (previous === undefined)
+        Reflect.deleteProperty(env, 'NUXT_REDIRECT_STATUS_CODE')
+      else
+        env.NUXT_REDIRECT_STATUS_CODE = previous
+    }
+  })
+
+  it('prevents storing an authenticated social preview', async () => {
+    const slug = `password-preview-${crypto.randomUUID()}`
+    const password = 'sample-link-password'
+    expect((await postJson('/api/link/create', { url: 'https://example.test/preview', title: 'Private preview', slug, password })).status).toBe(201)
+    createdSlugs.push(slug)
+
+    const response = await fetch(`/${slug}`, { headers: { 'User-Agent': 'Twitterbot/1.0', 'X-Link-Password': password } })
+    expect(response.status).toBe(200)
+    expect(await response.text()).toContain('Private preview')
+    expect(response.headers.get('cache-control')).toBe('private, no-store')
+  })
+
   it('shows password page without password, rejects wrong password, and redirects with correct password', async () => {
     const password = 'redirect-secret123'
     const payload = {
@@ -466,6 +610,7 @@ describe('password protected redirect', { concurrent: false }, () => {
       headers: { 'x-link-password': 'wrong-password' },
     })
     expect(wrongPasswordResponse.status).toBe(403)
+    expect(wrongPasswordResponse.headers.get('cache-control')).toBe('private, no-store')
 
     const correctPasswordResponse = await fetch(`/${payload.slug}`, {
       redirect: 'manual',
@@ -511,7 +656,7 @@ describe('password protected redirect', { concurrent: false }, () => {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ password, confirm: 'true' }),
     })
-    expect(confirmedResponse.status).toBe(301)
+    expect(confirmedResponse.status).toBe(303)
     expect(confirmedResponse.headers.get('Location')).toBe(targetUrl)
   })
 })
@@ -558,6 +703,9 @@ describe('proxied link gates', { concurrent: false }, () => {
           headers: {
             'Content-Type': 'text/html',
             'Cache-Control': 'public, max-age=3600',
+            'CDN-Cache-Control': 'public, max-age=3600',
+            'Cloudflare-CDN-Cache-Control': 'public, max-age=3600',
+            'Surrogate-Control': 'max-age=3600',
             'ETag': '"abc"',
           },
         })
@@ -579,6 +727,9 @@ describe('proxied link gates', { concurrent: false }, () => {
     expect(confirmed.status).toBe(200)
     expect(await confirmed.text()).toContain('gated html')
     expect(confirmed.headers.get('cache-control')).toBe('private, no-store')
+    expect(confirmed.headers.has('cdn-cache-control')).toBe(false)
+    expect(confirmed.headers.has('cloudflare-cdn-cache-control')).toBe(false)
+    expect(confirmed.headers.has('surrogate-control')).toBe(false)
     expect(confirmed.headers.get('etag')).toBe('"abc"')
     expect(confirmed.headers.get('content-security-policy')).toBeNull()
     expect(seen.method).toBe('GET')

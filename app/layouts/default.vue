@@ -97,7 +97,7 @@ function closeMobileMenu() {
                   <NavigationMenuItem>
                     <NavigationMenuLink as-child>
                       <a
-                        href="/_docs/scalar"
+                        href="/_docs/openapi.json"
                         target="_blank"
                         rel="noopener noreferrer"
                       >
@@ -187,7 +187,7 @@ function closeMobileMenu() {
                       <ExternalLink class="size-3.5" aria-hidden="true" />
                     </a>
                     <a
-                      href="/_docs/scalar"
+                      href="/_docs/openapi.json"
                       target="_blank"
                       rel="noopener noreferrer"
                       class="

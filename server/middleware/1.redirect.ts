@@ -1,5 +1,8 @@
-import type { Link } from '@/types'
+import type { H3Event } from 'h3'
+import type { Link } from '#shared/schemas/link'
+import { escape } from 'es-toolkit'
 import { parsePath, withQuery } from 'ufo'
+import { isHttpLinkUrl } from '#shared/utils/link-url'
 import { proxyLinkRequest } from '../services/link-proxy'
 
 const SOCIAL_BOTS = [
@@ -48,6 +51,14 @@ function hasOgConfig(link: Link): boolean {
   return !!(link.title || link.image)
 }
 
+function sendLinkRedirect(event: H3Event, location: string, status = 302) {
+  setResponseStatus(event, status)
+  setResponseHeader(event, 'Location', location)
+  setResponseHeader(event, 'Content-Type', 'text/html; charset=utf-8')
+  const url = escape(location.replaceAll('"', '%22'))
+  return `<!DOCTYPE html><html><head><meta http-equiv="refresh" content="0; url=${url}"></head></html>`
+}
+
 export default eventHandler(async (event) => {
   const { pathname: slug } = parsePath(event.path.replace(/^\/|\/$/g, ''))
   const { slugRegex, reserveSlug } = useAppConfig()
@@ -59,7 +70,7 @@ export default eventHandler(async (event) => {
   const { cloudflare } = event.context
 
   if (event.path === '/' && homeURL)
-    return sendRedirect(event, homeURL)
+    return sendLinkRedirect(event, homeURL)
 
   const { notFoundRedirect } = useRuntimeConfig(event)
   // Bypass redirect check for notFoundRedirect path to prevent infinite loop
@@ -79,14 +90,17 @@ export default eventHandler(async (event) => {
     }
 
     if (link) {
+      const privateCache = !!(link.password || link.unsafe)
+      if (privateCache)
+        setHeader(event, 'Cache-Control', 'private, no-store')
+
       let locale: RedirectLocale | undefined
       const getLocale = () => {
         locale ??= resolveRedirectLocale(event)
         return locale
       }
-      const sendNoStoreHtml = (html: string) => {
+      const sendHtml = (html: string) => {
         setHeader(event, 'Content-Type', 'text/html; charset=utf-8')
-        setHeader(event, 'Cache-Control', 'no-store')
         return html
       }
       const userAgent = getHeader(event, 'user-agent') || ''
@@ -99,10 +113,11 @@ export default eventHandler(async (event) => {
       if (country && typeof country === 'string' && link.geo?.[country.toUpperCase()]) {
         targetUrl = link.geo[country.toUpperCase()]!
       }
-      targetUrl = buildTarget(targetUrl)
-
       const deviceRedirectUrl = getDeviceRedirectUrl(userAgent, link)
-      const finalTargetUrl = deviceRedirectUrl ?? targetUrl
+      const destination = deviceRedirectUrl ?? targetUrl
+      if (!isHttpLinkUrl(destination))
+        throw createError({ status: 404, statusText: 'Link not found' })
+      const finalTargetUrl = deviceRedirectUrl ?? buildTarget(destination)
 
       // Reverse proxying is opt-in per link AND requires the instance flag
       // (NUXT_PUBLIC_LINK_PROXY_ENABLED). With the flag off, stored proxy links
@@ -133,18 +148,18 @@ export default eventHandler(async (event) => {
           const submittedPassword = typeof body?.password === 'string' ? body.password : ''
 
           if (!await verifyLinkPassword(submittedPassword, link.password)) {
-            return sendNoStoreHtml(generatePasswordHtml(slug, { hasError: true, locale: getLocale() }))
+            return sendHtml(generatePasswordHtml(slug, { hasError: true, locale: getLocale() }))
           }
 
           // Password correct - show unsafe warning if needed
           if (link.unsafe && body?.confirm !== 'true') {
-            return sendNoStoreHtml(generateUnsafeWarningHtml(slug, finalTargetUrl, { password: submittedPassword || undefined, locale: getLocale() }))
+            return sendHtml(generateUnsafeWarningHtml(slug, finalTargetUrl, { password: submittedPassword || undefined, locale: getLocale() }))
           }
 
           formConfirmed = true
         }
         else {
-          return sendNoStoreHtml(generatePasswordHtml(slug, { locale: getLocale() }))
+          return sendHtml(generatePasswordHtml(slug, { locale: getLocale() }))
         }
       }
 
@@ -156,11 +171,11 @@ export default eventHandler(async (event) => {
             formConfirmed = true
           }
           else {
-            return sendNoStoreHtml(generateUnsafeWarningHtml(slug, finalTargetUrl, { locale: getLocale() }))
+            return sendHtml(generateUnsafeWarningHtml(slug, finalTargetUrl, { locale: getLocale() }))
           }
         }
         else {
-          return sendNoStoreHtml(generateUnsafeWarningHtml(slug, finalTargetUrl, { locale: getLocale() }))
+          return sendHtml(generateUnsafeWarningHtml(slug, finalTargetUrl, { locale: getLocale() }))
         }
       }
 
@@ -189,41 +204,41 @@ export default eventHandler(async (event) => {
         }
       }
 
-      if (deviceRedirectUrl) {
-        if (redirectNoStore)
+      const sendResolvedRedirect = () => {
+        if (redirectNoStore && !privateCache)
           setHeader(event, 'Cache-Control', 'no-store')
-        return sendRedirect(event, finalTargetUrl, +redirectStatusCode)
+        // A 303 discards the gate form's body before the client visits the destination.
+        return sendLinkRedirect(event, finalTargetUrl, formConfirmed ? 303 : +redirectStatusCode)
       }
+
+      if (deviceRedirectUrl)
+        return sendResolvedRedirect()
+
       // Link previews use the configured OG metadata even for proxied links.
       if (isSocialBot(userAgent) && hasOgConfig(link)) {
         const baseUrl = `${getRequestProtocol(event)}://${getRequestHost(event)}`
-        const html = generateOgHtml(link, targetUrl, baseUrl)
-        setHeader(event, 'Content-Type', 'text/html; charset=utf-8')
-        return html
+        return sendHtml(generateOgHtml(link, finalTargetUrl, baseUrl))
       }
 
       if (isProxyLink) {
         return sendWebResponse(event, await proxyLinkRequest(event, finalTargetUrl, {
           method: formConfirmed ? 'GET' : event.method,
-          privateCache: !!(link.password || link.unsafe),
+          privateCache,
         }))
       }
 
       if (link.cloaking) {
         const baseUrl = `${getRequestProtocol(event)}://${getRequestHost(event)}`
-        const html = generateCloakingHtml(link, targetUrl, baseUrl)
-        setHeader(event, 'Content-Type', 'text/html; charset=utf-8')
-        setHeader(event, 'Cache-Control', 'no-store, private')
-        return html
+        if (!privateCache)
+          setHeader(event, 'Cache-Control', 'no-store, private')
+        return sendHtml(generateCloakingHtml(link, finalTargetUrl, baseUrl))
       }
 
-      if (redirectNoStore)
-        setHeader(event, 'Cache-Control', 'no-store')
-      return sendRedirect(event, finalTargetUrl, +redirectStatusCode)
+      return sendResolvedRedirect()
     }
     else {
       if (notFoundRedirect) {
-        return sendRedirect(event, notFoundRedirect, 302)
+        return sendLinkRedirect(event, notFoundRedirect)
       }
 
       throw createError({ status: 404, statusText: 'Link not found' })

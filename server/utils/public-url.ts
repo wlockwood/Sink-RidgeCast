@@ -1,15 +1,19 @@
+const LOCAL_DOMAINS = ['localhost', 'local', 'internal', 'lan', 'home', 'home.arpa']
+
 export function isPublicHttpUrl(url: string): boolean {
   try {
     const parsed = new URL(url)
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')
+    if ((parsed.protocol !== 'http:' && parsed.protocol !== 'https:') || parsed.username || parsed.password)
       return false
 
     const rawHostname = parsed.hostname.toLowerCase()
     const hostname = rawHostname.startsWith('[') && rawHostname.endsWith(']')
       ? rawHostname.slice(1, -1)
       : rawHostname.replace(/\.+$/, '')
-    if (hostname === 'localhost' || hostname.endsWith('.localhost'))
+    if ((!hostname.includes('.') && !hostname.includes(':'))
+      || LOCAL_DOMAINS.some(domain => hostname === domain || hostname.endsWith(`.${domain}`))) {
       return false
+    }
 
     return !isBlockedIp(hostname)
   }
@@ -41,7 +45,7 @@ function isBlockedIpv4(hostname: string): boolean {
   if (bytes.some(Number.isNaN))
     return false
 
-  const [a, b] = bytes as [number, number, number, number]
+  const [a, b, c] = bytes as [number, number, number, number]
 
   return a === 0
     || a === 10
@@ -49,29 +53,22 @@ function isBlockedIpv4(hostname: string): boolean {
     || (a === 100 && b >= 64 && b <= 127)
     || (a === 169 && b === 254)
     || (a === 172 && b >= 16 && b <= 31)
+    || (a === 192 && b === 0 && (c === 0 || c === 2))
+    || (a === 192 && b === 88 && c === 99)
     || (a === 192 && b === 168)
     || (a === 198 && (b === 18 || b === 19))
+    || (a === 198 && b === 51 && c === 100)
+    || (a === 203 && b === 0 && c === 113)
     || a >= 224
 }
 
 function isBlockedIpv6(hostname: string): boolean {
-  const firstSegment = Number.parseInt(hostname.split(':', 1)[0] || '0', 16)
-  if (hostname === '::'
-    || hostname === '::1'
-    || (firstSegment >= 0xFC00 && firstSegment <= 0xFDFF)
-    || (firstSegment >= 0xFE80 && firstSegment <= 0xFEBF)
-    || (firstSegment >= 0xFF00 && firstSegment <= 0xFFFF)) {
-    return true
-  }
-
-  const mappedMatch = hostname.match(/^::ffff:(?:(\d+\.\d+\.\d+\.\d+)|([\da-f]{1,4}):([\da-f]{1,4}))$/i)
-  if (!mappedMatch)
-    return false
-
-  if (mappedMatch[1])
-    return isBlockedIpv4(mappedMatch[1])
-
-  const high = Number.parseInt(mappedMatch[2]!, 16)
-  const low = Number.parseInt(mappedMatch[3]!, 16)
-  return isBlockedIpv4(`${high >> 8}.${high & 0xFF}.${low >> 8}.${low & 0xFF}`)
+  const [firstSegment = '', secondSegment = ''] = hostname.split(':', 2)
+  const first = Number.parseInt(firstSegment, 16)
+  const second = Number.parseInt(secondSegment || '0', 16)
+  // Allow global unicast only, excluding protocol assignments, 6to4 and documentation ranges.
+  return !(first >= 0x2000 && first < 0x4000)
+    || (first === 0x2001 && (second <= 0x1FF || second === 0xDB8))
+    || first === 0x2002
+    || first === 0x3FFF
 }

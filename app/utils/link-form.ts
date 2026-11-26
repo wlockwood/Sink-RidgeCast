@@ -1,5 +1,6 @@
 import type { DashboardLink, DashboardLinkFormData } from '@/types/dashboard-links'
 import { isMaskedLinkPassword } from '#shared/utils/link-password'
+import { isHttpLinkUrl } from '#shared/utils/link-url'
 import { date2unix, unix2date } from './time'
 
 export type LinkUrlValidationError
@@ -21,7 +22,7 @@ export function getLinkUrlValidationError(
   if (url.length > maxUrlLength)
     return { kind: 'too_long', length: url.length }
 
-  return URL.canParse(url) ? undefined : { kind: 'invalid' }
+  return isHttpLinkUrl(url) ? undefined : { kind: 'invalid' }
 }
 
 export function createLinkFormInitialValues(link: Partial<DashboardLink>): DashboardLinkFormData {

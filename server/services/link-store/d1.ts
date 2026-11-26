@@ -1,12 +1,15 @@
 import type { BatchItem } from 'drizzle-orm/batch'
 import type { H3Event } from 'h3'
+import type { ApplicationLinkWritePolicy } from '#shared/schemas/application-link-token'
 import type { Link } from '#shared/schemas/link'
 import type { LinkSearchItem, LinkSortBy, LinkStatus } from '#shared/types/link'
-import { and, asc, count, desc, eq, exists, gt, inArray, isNotNull, isNull, lt, lte, or, sql } from 'drizzle-orm'
+import { and, asc, count, desc, eq, exists, getTableColumns, gt, inArray, isNotNull, isNull, lt, lte, or, sql } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/d1'
 import { createError } from 'h3'
 import { parseURL, stringifyParsedURL } from 'ufo'
-import { links, linkTags, linkTombstones, tags } from '../../database/schema'
+import { applicationLinkSettings, applicationLinkTokens, links, linkTags, linkTombstones, tags } from '../../database/schema'
+import { APPLICATION_LINK_SETTINGS_ID } from '../../utils/application-link-settings'
+import { activeApplicationToken } from '../../utils/application-link-tokens'
 import { getExpiration } from '../../utils/time'
 
 const D1_CURSOR_PREFIX = 'd1:v1:'
@@ -207,24 +210,50 @@ export async function d1GetActiveLinkVersions(event: H3Event, expectedLinks: Lin
   return new Set(rows.map(row => row.slug))
 }
 
-export async function d1CreateLink(event: H3Event, link: Link): Promise<{ created: boolean, effectiveExpiresAt: number | null }> {
+export async function d1CreateLink(event: H3Event, link: Link, applicationPolicy?: ApplicationLinkWritePolicy): Promise<{ created: boolean, effectiveExpiresAt: number | null }> {
   const db = getDatabase(event)
-  const { statements, effectiveExpiresAt } = buildCreateLinkStatements(event, db, link)
+  const { statements, effectiveExpiresAt } = buildCreateLinkStatements(event, db, link, applicationPolicy)
   const [created] = await db.batch(statements)
   return { created: (created as { slug: string }[]).length > 0, effectiveExpiresAt }
 }
 
-function buildCreateLinkStatements(event: H3Event, db: ReturnType<typeof getDatabase>, link: Link): { statements: [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]], effectiveExpiresAt: number | null } {
+function buildCreateLinkStatements(event: H3Event, db: ReturnType<typeof getDatabase>, link: Link, applicationPolicy?: ApplicationLinkWritePolicy): { statements: [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]], effectiveExpiresAt: number | null } {
   const now = Math.floor(Date.now() / 1000)
   const values = buildD1LinkValues(event, link)
   const effectiveExpiresAt = values.effectiveExpiresAt
   const pendingValues = { ...values, effectiveExpiresAt: 0 }
-  const pendingLink = and(eq(links.slug, link.slug), eq(links.effectiveExpiresAt, 0))
-  const insert = db.insert(links).values(pendingValues).onConflictDoUpdate({
+  const activeToken = applicationPolicy && activeApplicationToken(applicationPolicy.credential)
+  const applicationPolicyMatches = applicationPolicy
+    ? and(
+        exists(db.select({ revision: applicationLinkSettings.revision }).from(applicationLinkSettings).where(and(
+          eq(applicationLinkSettings.id, APPLICATION_LINK_SETTINGS_ID),
+          eq(applicationLinkSettings.revision, applicationPolicy.revision),
+        ))),
+        exists(db.select({ id: applicationLinkTokens.id }).from(applicationLinkTokens).where(activeToken)),
+      )
+    : undefined
+  const pendingLink = and(eq(links.slug, link.slug), eq(links.effectiveExpiresAt, 0), applicationPolicyMatches)
+  const insertLink = db.insert(links)
+  const columns = getTableColumns(links)
+  // INSERT ... SELECT lets the policy check and the link write run in one D1 transaction.
+  const insertValues = applicationPolicyMatches
+    ? insertLink.select(sql`select ${sql.join(Object.keys(columns).map((key) => {
+        const field = key as keyof typeof columns
+        return sql.param(pendingValues[field], columns[field])
+      }), sql`, `)} where ${applicationPolicyMatches}`)
+    : insertLink.values(pendingValues)
+  const insert = insertValues.onConflictDoUpdate({
     target: links.slug,
     set: pendingValues,
     setWhere: and(isNotNull(links.effectiveExpiresAt), lte(links.effectiveExpiresAt, now)),
   }).returning({ slug: links.slug })
+  // changes() is the number of rows written by the immediately preceding insert/upsert in this batch.
+  const usage = activeToken
+    ? [db.update(applicationLinkTokens).set({
+        linksCreated: sql`${applicationLinkTokens.linksCreated} + 1`,
+        lastUsedAt: sql`max(coalesce(${applicationLinkTokens.lastUsedAt}, 0), ${Date.now()})`,
+      }).where(and(activeToken, sql`changes() = 1`))]
+    : []
   const clearTombstone = db.delete(linkTombstones).where(and(
     eq(linkTombstones.slug, link.slug),
     exists(db.select({ slug: links.slug }).from(links).where(pendingLink)),
@@ -243,7 +272,7 @@ function buildCreateLinkStatements(event: H3Event, db: ReturnType<typeof getData
   ).onConflictDoNothing())
   const finalize = db.update(links).set({ effectiveExpiresAt }).where(pendingLink)
   return {
-    statements: [insert, clearTombstone, clearTags, ...tagInserts, ...associationInserts, finalize],
+    statements: [insert, ...usage, clearTombstone, clearTags, ...tagInserts, ...associationInserts, finalize],
     effectiveExpiresAt,
   }
 }

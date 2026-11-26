@@ -1,10 +1,9 @@
 import type { H3Event } from 'h3'
 import type { LinkCheckRequest, LinkCheckResponse, LinkCheckResult } from '#shared/types/link-check'
 import { getHeader } from 'h3'
-import { ofetch } from 'ofetch'
 import { toErrorMessage } from '#shared/utils/error'
 import { listLinks } from './link-store'
-import { isPublicHttpUrl } from './public-url'
+import { fetchPublicHttp } from './public-http'
 
 const SAFE_FORWARDED_HEADERS = ['accept-language', 'user-agent'] as const
 
@@ -29,25 +28,8 @@ async function checkLink(
   const checkedAt = new Date().toISOString()
   const link = target
 
-  if (!isPublicHttpUrl(link.url)) {
-    return {
-      ...link,
-      status: 0,
-      ok: false,
-      error: 'URL is not allowed for server-side checking',
-      duration: Date.now() - startedAt,
-      checkedAt,
-    }
-  }
-
   try {
-    const response = await ofetch.raw(link.url, {
-      method: 'GET',
-      headers,
-      timeout: timeoutSeconds * 1000,
-      ignoreResponseError: true,
-      responseType: 'stream',
-    })
+    const response = await fetchPublicHttp(link.url, headers, AbortSignal.timeout(timeoutSeconds * 1000))
     const status = response.status
 
     if (response.body)

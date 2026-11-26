@@ -3,8 +3,8 @@ import type { ComponentPublicInstance } from 'vue'
 import type { DashboardLink } from '@/types/dashboard-links'
 import { CalendarPlus2, Copy, CopyCheck, Ellipsis, Eraser, Flame, Hourglass, Link as LinkIcon, MousePointerClick, QrCode, ShieldAlert, SquarePen, Users } from '@lucide/vue'
 import { useClipboard, useMediaQuery } from '@vueuse/core'
-import { parseURL } from 'ufo'
 import { toast } from 'vue-sonner'
+import { isHttpLinkUrl } from '#shared/utils/link-url'
 
 const props = defineProps<{
   link: DashboardLink
@@ -72,13 +72,8 @@ const requestUrl = useRequestURL()
 const host = requestUrl.host
 const origin = requestUrl.origin
 
-function getLinkHost(url: string): string | undefined {
-  const { host } = parseURL(url)
-  return host
-}
-
 const shortLink = computed(() => `${origin}/${props.link.slug}`)
-const linkIcon = computed(() => `https://unavatar.webp.se/${getLinkHost(props.link.url)}?fallback=https://sink.cool/icon.png`)
+const destinationUrl = computed(() => isHttpLinkUrl(props.link.url) ? props.link.url : undefined)
 const isExpired = computed(() => Boolean(props.link.expiration && props.link.expiration <= Math.floor(Date.now() / 1000)))
 const noteText = computed(() => props.link.comment?.trim() ?? '')
 const summaryText = computed(() => props.link.title?.trim() || props.link.description?.trim() || '')
@@ -106,11 +101,6 @@ function copyLink() {
           class="group flex min-w-0 flex-1 cursor-pointer items-center gap-3"
         >
           <Avatar>
-            <AvatarImage
-              :src="linkIcon"
-              :alt="link.slug"
-              loading="lazy"
-            />
             <AvatarFallback>
               <img
                 src="/icon.png"
@@ -209,9 +199,9 @@ function copyLink() {
             <Copy v-else aria-hidden="true" class="size-4" />
           </Button>
 
-          <Button as-child variant="ghost" :size="isDesktop ? 'icon' : 'icon-lg'">
+          <Button v-if="destinationUrl" as-child variant="ghost" :size="isDesktop ? 'icon' : 'icon-lg'">
             <a
-              :href="link.url"
+              :href="destinationUrl"
               target="_blank"
               rel="noopener noreferrer"
               :aria-label="link.url"
@@ -233,7 +223,7 @@ function copyLink() {
             <PopoverContent>
               <DashboardLinksQRCode
                 :data="shortLink"
-                :image="linkIcon"
+                image="/icon.png"
               />
             </PopoverContent>
           </Popover>
@@ -406,7 +396,7 @@ function copyLink() {
     <DashboardLinksQRCodeDialog
       v-model:open="qrDialogOpen"
       :data="shortLink"
-      :image="linkIcon"
+      image="/icon.png"
       @close-auto-focus="handleDialogCloseAutoFocus"
     />
     <DashboardLinksEditorModal

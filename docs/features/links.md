@@ -99,14 +99,14 @@ Any active upstream content (HTML, JavaScript, SVG) runs in the same origin as y
 
 Sink enforces the following built-in protections:
 
-- **Private target blocking:** Only public `http(s)` targets are allowed. Requests to `localhost`, IPv4 private/reserved ranges, and IPv6 `::`, `::1`, ULA, link-local, multicast, or `::ffff:` mapped addresses are blocked. Literal-IP checks cannot defend against DNS rebinding on hostname targets. Upstream redirects are followed automatically by the runtime, and only the initial target is validated.
-- **Request header filtering:** Client `cookie`, `host`, hop-by-hop headers, `content-length`, `cf-*`, `x-forwarded-*`, `x-real-ip`, and `x-link-*` headers are stripped; `authorization` and other custom headers are forwarded. Sink automatically populates `x-forwarded-for`, `x-forwarded-proto`, and `x-forwarded-host`.
-- **Response header filtering:** Upstream hop-by-hop headers and `set-cookie` headers are stripped. Responses always include `X-Content-Type-Options: nosniff`.
-- **Protected link isolation:** When a visitor confirms a password or unsafe warning form, the upstream request is made within the same request as a bodyless GET, ensuring submitted passwords are never sent upstream. API clients can stream request bodies (JSON or binary) directly by passing `x-link-password` and `x-link-confirm: true` headers. Responses for password-protected or unsafe links are always marked `Cache-Control: private, no-store`.
+- **Destination checks.** Sink validates the initial target and up to five redirect hops. Cross-origin redirects carrying a body or credential headers are blocked. Literal address checks do not pin DNS for hostnames.
+- **Request headers.** Sink strips cookies, connection-specific headers and client-supplied forwarding headers. It sets forwarding headers from the Worker request and Cloudflare client address. Authorization and custom headers may reach the original trusted target.
+- **Response headers.** Sink strips connection-specific headers and `Set-Cookie`. Responses include `X-Content-Type-Options: nosniff`.
+- **Protected links.** Confirming a form initiates a bodyless GET. API clients can send request bodies with `x-link-password` and `x-link-confirm: true`. Protected responses use `Cache-Control: private, no-store` and discard upstream cache overrides.
 
 ## Health check
 
-**Dashboard → Check** (and `/api/link/check`) probes target URLs from the server (up to 10 at a time, 1–30s timeout). Private/local addresses are blocked.
+**Dashboard → Check** (and `/api/link/check`) probes target URLs from the server (up to 10 at a time, 1–30s timeout). Sink checks each redirect for private and local addresses before following it.
 
 ## Site-wide redirect options
 

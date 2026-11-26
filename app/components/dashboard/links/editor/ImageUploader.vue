@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ImagePlus, Loader2, X } from '@lucide/vue'
 import { toast } from 'vue-sonner'
-import { IMAGE_ALLOWED_TYPES, IMAGE_MAX_SIZE } from '#shared/utils/image'
+import { getImageAssetContentType, IMAGE_ALLOWED_TYPES, IMAGE_MAX_SIZE } from '#shared/utils/image'
 
 const props = defineProps<{
   slug: string
@@ -11,7 +11,22 @@ const props = defineProps<{
 const imageUrl = defineModel<string>()
 
 const { t } = useI18n()
-const canUpload = computed(() => !!props.slug?.trim())
+const { previewMode } = useRuntimeConfig().public
+const canUpload = computed(() => !previewMode && !!props.slug?.trim())
+const uploadLabel = computed(() => {
+  if (previewMode)
+    return t('links.preview_mode_tip')
+  return t(canUpload.value ? 'links.form.image_upload_hint' : 'links.form.slug_required')
+})
+const { origin } = useRequestURL()
+const previewUrl = computed(() => {
+  if (!imageUrl.value)
+    return undefined
+
+  const path = imageUrl.value.startsWith(origin) ? imageUrl.value.slice(origin.length) : imageUrl.value
+  const prefix = '/_assets/'
+  return path.startsWith(prefix) && getImageAssetContentType(path.slice(prefix.length)) ? path : undefined
+})
 const uploading = ref(false)
 const dragOver = ref(false)
 const fileInput = useTemplateRef<HTMLInputElement>('fileInput')
@@ -21,7 +36,7 @@ async function handleFile(file: File) {
     return
 
   if (!canUpload.value) {
-    toast.error(t('links.form.slug_required'))
+    toast.error(uploadLabel.value)
     return
   }
 
@@ -126,7 +141,7 @@ function openFilePicker() {
       :tabindex="canUpload && !uploading ? 0 : -1"
       :aria-disabled="!canUpload || uploading"
       :aria-busy="uploading"
-      :aria-label="canUpload ? $t('links.form.image_upload_hint') : $t('links.form.slug_required')"
+      :aria-label="uploadLabel"
       @click="canUpload && openFilePicker()"
       @keydown.enter.prevent="canUpload && !uploading && openFilePicker()"
       @keydown.space.prevent="canUpload && !uploading && openFilePicker()"
@@ -143,17 +158,21 @@ function openFilePicker() {
           aria-hidden="true"
         />
         <ImagePlus v-else aria-hidden="true" class="size-8" />
-        <span class="text-sm">{{ canUpload ? $t('links.form.image_upload_hint') : $t('links.form.slug_required') }}</span>
+        <span class="text-sm">{{ uploadLabel }}</span>
         <span v-if="canUpload" class="text-xs opacity-60">{{ $t('links.form.image_ratio_hint') }}</span>
       </div>
     </AspectRatio>
 
     <AspectRatio v-else :ratio="1200 / 630" class="relative">
       <img
-        :src="imageUrl"
+        v-if="previewUrl"
+        :src="previewUrl"
         :alt="$t('links.form.image_preview')"
         class="size-full rounded-md object-cover"
       >
+      <div v-else class="flex size-full items-center p-4 pr-14">
+        <span class="min-w-0 truncate">{{ imageUrl }}</span>
+      </div>
       <Button
         type="button"
         variant="destructive"
