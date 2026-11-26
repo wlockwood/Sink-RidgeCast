@@ -19,7 +19,7 @@
       "binding": "DB",
       "database_name": "sink-ridgecast-db",
       "database_id": "82421aa8-acf2-46fd-b570-8ea8a2de85df",
-      "migrations_dir": "server/database/migrations"
+      "migrations_dir": "drizzle"
     }
   ],
   "analytics_engine_datasets": [
