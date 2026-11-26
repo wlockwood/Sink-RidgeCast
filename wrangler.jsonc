@@ -18,7 +18,18 @@
     {
       "binding": "DB",
       "database_name": "sink-ridgecast-db",
-      "database_id": "82421aa8-acf2-46fd-b570-8ea8a2de85df"
+      "database_id": "82421aa8-acf2-46fd-b570-8ea8a2de85df",
+      "migrations_dir": "server/database/migrations"
     }
-  ]
+  ],
+  "analytics_engine_datasets": [
+    {
+      "binding": "ANALYTICS",
+      "dataset": "sink-ridgecast"
+    }
+  ],
+  "vars": {
+    "NUXT_CF_ACCOUNT_ID": "1fad84633451c4018e7814715f6eae87",
+    "NUXT_DATASET": "sink-ridgecast"
+  }
 }
