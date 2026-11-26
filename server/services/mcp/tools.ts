@@ -6,10 +6,10 @@ import {
   CreateLinkSchema,
   DeleteLinkSchema,
   EditLinkSchema,
-  LinkFilterQuerySchema,
+  LinkFilterBodySchema,
   LinkSlugQuerySchema,
   ListLinksQuerySchema,
-  SearchLinksQuerySchema,
+  SearchLinksBodySchema,
 } from '#shared/schemas/link'
 import { LinkCheckRequestSchema } from '#shared/schemas/link-check'
 import { FilterQuerySchema } from '#shared/schemas/query'
@@ -71,7 +71,7 @@ const linkTools: McpToolDefinition[] = [
   defineTool({
     name: 'search_links',
     description: 'Search links by keyword or exact destination URL. One of `q` or `url` is required; without either the result is empty.',
-    inputSchema: SearchLinksQuerySchema,
+    inputSchema: SearchLinksBodySchema,
     annotations: { readOnlyHint: true },
     async handler(event, args) {
       const links = args.q || args.url ? await searchLinks(event, args) : []
@@ -94,7 +94,7 @@ const linkTools: McpToolDefinition[] = [
   defineTool({
     name: 'count_links',
     description: 'Count links matching an optional keyword, URL, tag, or expiration status.',
-    inputSchema: LinkFilterQuerySchema,
+    inputSchema: LinkFilterBodySchema,
     annotations: { readOnlyHint: true },
     async handler(event, args) {
       return { count: await countLinks(event, args) }

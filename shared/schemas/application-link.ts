@@ -7,7 +7,7 @@ export const MAX_APPLICATION_ALLOWED_URLS = 100
 const prefixPattern = /^(?:[a-zA-Z0-9]+(?:-[a-zA-Z0-9]+)*-?)?$/
 
 export const ShortenLinkSchema = z.strictObject({
-  url: z.string().trim().url().describe('An allowlisted HTTPS destination.'),
+  url: z.string().trim().url().describe('An allowlisted HTTPS destination. Up to 65,536 encoded bytes after normalization when the portion before the fragment fits the regular URL and 16 KiB request limits.'),
   prefix: z.string().max(5).regex(prefixPattern).optional().describe('Up to five characters to replace the start of the generated slug. Use letters, digits, and single hyphens after a letter or digit.'),
 })
 

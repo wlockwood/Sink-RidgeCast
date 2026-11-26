@@ -45,4 +45,10 @@ describe('link destination validation', () => {
     expect(schema.EditLinkSchema.safeParse(data).success).toBe(true)
     expect(schema.ImportLinkSchema.safeParse(data).success).toBe(true)
   })
+
+  it('keeps stored long destinations valid under a smaller creation limit', () => {
+    const url = `https://example.com/${'a'.repeat(800)}#${'b'.repeat(40_000)}`
+    expect(schema.isExtendedApplicationLinkUrl(url)).toBe(true)
+    expect(schema.isExtendedApplicationLinkUrl(url, 256)).toBe(false)
+  })
 })

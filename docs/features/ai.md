@@ -19,6 +19,7 @@ For a URL, Sink tries to read the page and ask the model for structured output:
 
 - `GET /api/link/ai?url=...` — short-code suggestion
 - `GET /api/link/og-ai?url=...&locale=...` — title and description; optional `locale` query for preferred language
+- `POST /api/link/og-ai` accepts `url` and optional `locale` in JSON for long destinations. Preview generation uses the page address before the fragment.
 
 If the model fails after the request starts, Sink falls back to a simple URL-based suggestion. Always review before saving.
 

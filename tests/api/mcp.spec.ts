@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { clearLinkMigrationState, deleteStoredLinks, expectStoredHashedPassword, fetch, fetchWithAuth, getStoredLink, setLinkStoreD1Mode } from '../utils'
+import { clearLinkMigrationState, deleteStoredLinks, expectStoredHashedPassword, fetch, fetchWithAuth, getStoredLink, postJson, setLinkStoreD1Mode } from '../utils'
 
 const MCP_PATH = '/api/mcp'
 const PROTOCOL_VERSION = '2025-11-25'
@@ -278,6 +278,18 @@ describe('/api/mcp tools', () => {
 
     const { payload: tagged } = await callTool('list_tags', {})
     expect(Array.isArray(tagged.result?.structuredContent.tags)).toBe(true)
+  })
+
+  it('searches and counts a stored long application destination by URL', async () => {
+    const slug = trackSlug(`mcp-${crypto.randomUUID()}`)
+    const url = `https://example.com/map#${'a'.repeat(40_000)}`
+    const imported = await postJson('/api/link/import', { version: '1.0', links: [{ slug, url, redirectWithQuery: false }] })
+    expect(imported.status).toBe(200)
+
+    const { payload: search } = await callTool('search_links', { url })
+    expect(search.result?.structuredContent?.links?.[0]?.slug).toBe(slug)
+    const { payload: counted } = await callTool('count_links', { url })
+    expect(counted.result?.structuredContent?.count).toBe(1)
   })
 
   it('clears link protection when update_link sends an empty password', async () => {

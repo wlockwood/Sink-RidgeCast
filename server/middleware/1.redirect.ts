@@ -2,6 +2,7 @@ import type { H3Event } from 'h3'
 import type { Link } from '#shared/schemas/link'
 import { escape } from 'es-toolkit'
 import { parsePath, withQuery } from 'ufo'
+import { isExtendedApplicationLinkUrl } from '#shared/schemas/link'
 import { isHttpLinkUrl } from '#shared/utils/link-url'
 import { proxyLinkRequest } from '../services/link-proxy'
 
@@ -205,10 +206,12 @@ export default eventHandler(async (event) => {
       }
 
       const sendResolvedRedirect = () => {
-        if (redirectNoStore && !privateCache)
+        const extended = isExtendedApplicationLinkUrl(finalTargetUrl)
+        if ((redirectNoStore || extended) && !privateCache)
           setHeader(event, 'Cache-Control', 'no-store')
         // A 303 discards the gate form's body before the client visits the destination.
-        return sendLinkRedirect(event, finalTargetUrl, formConfirmed ? 303 : +redirectStatusCode)
+        const status = extended ? 302 : +redirectStatusCode
+        return sendLinkRedirect(event, finalTargetUrl, formConfirmed ? 303 : status)
       }
 
       if (deviceRedirectUrl)

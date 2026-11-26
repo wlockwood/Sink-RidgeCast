@@ -23,6 +23,11 @@ if (!Number.isSafeInteger(configuredMaxUrlLength)
 }
 
 export const MAX_URL_LENGTH = configuredMaxUrlLength
+export const MAX_LINK_TITLE_LENGTH = 256
+export const MAX_LINK_DESCRIPTION_LENGTH = 2048
+const MAX_APPLICATION_URL_BYTES = 64 * 1024
+const MAX_APPLICATION_REQUEST_URL_BYTES = 16 * 1024
+
 export const nanoid = (length: number = slugDefaultLength) => customAlphabet('23456789abcdefghjkmnpqrstuvwxyz', length)
 
 const TagsSchema = z.preprocess((value) => {
@@ -42,12 +47,37 @@ export const EditLinkPasswordSchema = z.string().trim().max(128).refine(
 ).optional().describe('Password protection for the link. An empty string clears it; omitting keeps the stored one.')
 
 const IdSchema = z.string().trim().min(1).max(26)
-export const UrlSchema = z.string()
-  .trim()
-  .min(1, 'URL is required')
-  .max(MAX_URL_LENGTH, `URL must not exceed ${MAX_URL_LENGTH} characters`)
-  .url('URL format is invalid')
+function linkUrlSchema(maxLength: number) {
+  return z.string()
+    .trim()
+    .min(1, 'URL is required')
+    .max(maxLength, `URL must not exceed ${maxLength} characters`)
+    .url('URL format is invalid')
+}
+
+export const UrlSchema = linkUrlSchema(MAX_URL_LENGTH)
+export const ApplicationLinkUrlSchema = linkUrlSchema(MAX_APPLICATION_URL_BYTES)
 export const HttpUrlSchema = UrlSchema.refine(isHttpLinkUrl, 'URL must use HTTP or HTTPS')
+
+export function isExtendedApplicationLinkUrl(value: string, requestUrlLimit = MAX_APPLICATION_REQUEST_URL_BYTES): boolean {
+  // A serialized HTTPS URL is ASCII, and only the portion before the fragment goes on the wire as a request URL.
+  const fragmentStart = value.indexOf('#')
+  if (value.length <= MAX_URL_LENGTH || value.length > MAX_APPLICATION_URL_BYTES
+    || fragmentStart === -1 || fragmentStart > Math.min(requestUrlLimit, MAX_APPLICATION_REQUEST_URL_BYTES)
+    || !value.startsWith('https://')) {
+    return false
+  }
+
+  try {
+    const url = new URL(value)
+    return url.href === value && !url.username && !url.password
+  }
+  catch {
+    return false
+  }
+}
+
+const ManagedLinkUrlSchema = HttpUrlSchema.or(ApplicationLinkUrlSchema.refine(isExtendedApplicationLinkUrl))
 
 function geoSchema(destination: typeof UrlSchema) {
   return z.preprocess((value) => {
@@ -81,8 +111,8 @@ const StoredLinkFieldsSchema = z.object({
   slug: SlugSchema.describe('The slug identifying the short link.'),
   comment: z.string().trim().max(2048).optional().describe('Optional internal note.'),
   expiration: ExpirationSchema.optional().describe('Unix seconds. Must be in the future.'),
-  title: z.string().trim().max(256).optional().describe('Overrides the title in the link preview.'),
-  description: z.string().trim().max(2048).optional().describe('Overrides the description in the link preview.'),
+  title: z.string().trim().max(MAX_LINK_TITLE_LENGTH).optional().describe('Overrides the title in the link preview.'),
+  description: z.string().trim().max(MAX_LINK_DESCRIPTION_LENGTH).optional().describe('Overrides the description in the link preview.'),
   image: z.string().trim().max(128).optional().describe('Overrides the image in the link preview.'),
   apple: z.string().trim().url().max(MAX_URL_LENGTH).optional().describe('Apple App Store redirect URL.'),
   google: z.string().trim().url().max(MAX_URL_LENGTH).optional().describe('Google Play Store redirect URL.'),
@@ -111,18 +141,24 @@ export const CreateLinkSchema = LinkFieldsSchema.extend({
 })
 
 export const EditLinkSchema = LinkFieldsSchema.extend({
+  url: ManagedLinkUrlSchema.describe('The HTTP or HTTPS target URL. Existing long application destinations can be kept during edits.'),
   password: EditLinkPasswordSchema,
 })
 
 export const ImportLinkSchema = LinkFieldsSchema.extend({
+  url: ManagedLinkUrlSchema.describe('The HTTP or HTTPS target URL, including exported long application destinations.'),
   slug: NewSlugSchema,
   id: z.preprocess(value => typeof value === 'string' && !value.trim() ? undefined : value, IdSchema.optional()),
   createdAt: TimestampSchema.optional(),
   updatedAt: TimestampSchema.optional(),
   expiration: TimestampSchema.optional(),
+}).refine(link => link.url.length <= MAX_URL_LENGTH || (!link.proxy && link.redirectWithQuery === false), {
+  path: ['url'],
+  message: 'Long application destinations require query forwarding and proxying to be disabled.',
 })
 
 export const StoredLinkSchema = StoredLinkFieldsSchema.extend({
+  url: ApplicationLinkUrlSchema.describe('The stored target URL.'),
   id: IdSchema,
   createdAt: TimestampSchema,
   updatedAt: TimestampSchema,
@@ -138,7 +174,7 @@ const LinkTagFilterSchema = z.string().trim().toLowerCase().min(1).max(32).descr
 const LinkStatusFilterSchema = z.enum(['active', 'expired', 'all']).default('active')
 const LinkQueryLimitSchema = z.coerce.number().int().min(1).max(1000).default(20).describe('Maximum number of results, 1-1000.')
 
-/** Read contracts shared by the REST link routes and the MCP link tools. */
+/** Query-string filters for REST link routes. */
 export const LinkFilterQuerySchema = z.object({
   q: LinkKeywordSchema.optional(),
   url: z.string().trim().url().max(MAX_URL_LENGTH).optional().describe('Target URL matched exactly.'),
@@ -150,10 +186,24 @@ export const SearchLinksQuerySchema = LinkFilterQuerySchema.extend({
   limit: LinkQueryLimitSchema,
 })
 
+const ExactLookupUrlSchema = ApplicationLinkUrlSchema.refine(
+  url => url.length <= MAX_URL_LENGTH || isExtendedApplicationLinkUrl(url),
+  'URL exceeds the applicable length limit',
+).describe('Normalized target URL to match exactly.')
+
+/** Body-based searches can carry long application destinations. */
+export const LinkFilterBodySchema = LinkFilterQuerySchema.extend({
+  url: ExactLookupUrlSchema.optional(),
+})
+
+export const SearchLinksBodySchema = LinkFilterBodySchema.extend({
+  limit: LinkQueryLimitSchema,
+})
+
 /** POST /api/link/search body: an exact URL match kept out of the query string. */
-export const ExactUrlSearchSchema = SearchLinksQuerySchema
+export const ExactUrlSearchSchema = SearchLinksBodySchema
   .pick({ url: true, limit: true })
-  .extend({ url: UrlSchema.describe('Normalized target URL to match exactly.') })
+  .required({ url: true })
 
 export const ListLinksQuerySchema = z.object({
   limit: LinkQueryLimitSchema,

@@ -1,6 +1,7 @@
 import type { H3Event } from 'h3'
 import type { ApplicationLinkWritePolicy } from '#shared/schemas/application-link-token'
 import type { EditLink, Link } from '#shared/schemas/link'
+import { MAX_URL_LENGTH } from '#shared/schemas/link'
 
 const editableOptionalLinkFields = [
   'comment',
@@ -130,6 +131,12 @@ export async function replaceLink(event: H3Event, link: EditLink): Promise<LinkR
   const existingLink = await getAnyAuthoritativeLink(event, link.slug)
   if (!existingLink)
     throw createError({ status: 404, statusText: 'Link not found' })
+
+  if (link.url.length > MAX_URL_LENGTH) {
+    if (link.url !== existingLink.url || link.proxy || link.redirectWithQuery)
+      throw createError({ status: 400, statusText: 'Keep the original long application destination with query forwarding and proxying disabled' })
+    link.redirectWithQuery = false
+  }
 
   if (link.url !== existingLink.url)
     await detectUnsafeLink(event, link)

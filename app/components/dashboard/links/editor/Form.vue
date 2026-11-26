@@ -5,7 +5,7 @@ import { useForm } from '@tanstack/vue-form'
 import { useDebounceFn } from '@vueuse/core'
 import { toast } from 'vue-sonner'
 import { z } from 'zod'
-import { MAX_URL_LENGTH, nanoid, SlugSchema } from '#shared/schemas/link'
+import { isExtendedApplicationLinkUrl, MAX_URL_LENGTH, nanoid, SlugSchema } from '#shared/schemas/link'
 
 const props = defineProps<{
   link: Partial<DashboardLink>
@@ -75,8 +75,15 @@ function makeUrlValidator(optional: boolean) {
   }
 }
 
-const validateUrl = makeUrlValidator(false)
+const validateNewUrl = makeUrlValidator(false)
 const validateOptionalUrl = makeUrlValidator(true)
+
+function validateUrl(field: { value: unknown }) {
+  const { value } = field
+  if (props.isEdit && typeof value === 'string' && value === props.link.url && isExtendedApplicationLinkUrl(value))
+    return undefined
+  return validateNewUrl(field)
+}
 
 const utmBuilderOpen = ref(false)
 const advancedSections = ref<string[]>([])

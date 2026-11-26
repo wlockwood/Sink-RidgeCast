@@ -67,7 +67,8 @@ async function aiOg() {
   aiOgPending.value = true
   try {
     const result = await useAPI<{ title?: string, description?: string }>('/api/link/og-ai', {
-      query: { url },
+      method: 'POST',
+      body: { url },
     })
 
     if (result.title) {

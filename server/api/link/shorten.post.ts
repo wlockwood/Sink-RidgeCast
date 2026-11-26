@@ -1,6 +1,8 @@
 import { getAllowedApplicationDestination, ShortenLinkSchema } from '#shared/schemas/application-link'
-import { CreateLinkSchema, MAX_URL_LENGTH, nanoid } from '#shared/schemas/link'
+import { ApplicationLinkUrlSchema, CreateLinkSchema, isExtendedApplicationLinkUrl, MAX_URL_LENGTH, nanoid } from '#shared/schemas/link'
 import { APPLICATION_SHORTEN_BODY_LIMIT } from '#shared/utils/request-limits'
+
+const CreateApplicationLinkSchema = CreateLinkSchema.extend({ url: ApplicationLinkUrlSchema })
 
 defineRouteMeta({
   openAPI: {
@@ -53,14 +55,14 @@ export default eventHandler(async (event) => {
   const destination = getAllowedApplicationDestination(url, allowedUrls)
   if (!destination)
     throw createError({ status: 403, statusText: 'Destination is not allowed' })
-  if (destination.length > MAX_URL_LENGTH)
+  if (destination.length > MAX_URL_LENGTH && !isExtendedApplicationLinkUrl(destination, MAX_URL_LENGTH))
     throw createError({ status: 400, statusText: 'Encoded destination URL exceeds the maximum length' })
 
   const configuredLength = Number(useRuntimeConfig(event).public.slugDefaultLength)
   // Keep at least six random characters even when the caller uses a five-character prefix.
   const slugLength = Number.isInteger(configuredLength) && configuredLength <= 2048 ? Math.max(11, configuredLength) : 11
   const slug = prefix + nanoid(slugLength - prefix.length)()
-  const link = CreateLinkSchema.parse({ url: destination, slug, redirectWithQuery: false })
+  const link = CreateApplicationLinkSchema.parse({ url: destination, slug, redirectWithQuery: false })
   const response = await saveNewLink(event, link, { revision, credential })
 
   setResponseStatus(event, 201)

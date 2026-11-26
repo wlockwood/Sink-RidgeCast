@@ -64,6 +64,7 @@ describe('/_docs/openapi.json', () => {
     const spec = await getOpenApiSpec()
     const shortenLink = spec.components?.schemas?.ShortenLink
     expect(shortenLink?.required).toEqual(['url'])
+    expect(shortenLink?.properties?.url?.description).toContain('65,536 encoded bytes')
     expect(shortenLink?.properties?.prefix?.maxLength).toBe(5)
     expect(shortenLink?.properties?.prefix?.pattern).toBeTruthy()
     expect('RC-').toMatch(new RegExp(shortenLink.properties.prefix.pattern))
@@ -96,7 +97,10 @@ describe('/_docs/openapi.json', () => {
     const items = importData?.properties?.links?.items
     expect(items?.type).toBe('object')
     expect(items?.required).toEqual(expect.arrayContaining(['url', 'slug']))
-    expect(items?.properties?.url?.format).toBe('uri')
+    const urlSchema = items?.properties?.url
+    expect(urlSchema?.anyOf ?? [urlSchema]).toEqual(expect.arrayContaining([
+      expect.objectContaining({ format: 'uri', maxLength: 65536 }),
+    ]))
     expect(items?.properties?.tags?.type).toBe('array')
   })
 

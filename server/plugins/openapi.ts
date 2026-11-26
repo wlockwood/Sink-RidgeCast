@@ -4,6 +4,7 @@ import { ApplicationLinkSettingsSchema, ShortenLinkSchema } from '#shared/schema
 import { CreateApplicationTokenSchema, RotateApplicationTokenSchema } from '#shared/schemas/application-link-token'
 import { ImportDataSchema } from '#shared/schemas/import'
 import { CreateLinkSchema, EditLinkSchema, ExactUrlSearchSchema } from '#shared/schemas/link'
+import { LinkPreviewRequestSchema } from '../utils/link-preview'
 
 // Nitro's defineRouteMeta extractor only keeps static literals, so dynamic
 // JSON Schemas cannot be declared per route. This plugin generates them from
@@ -29,6 +30,7 @@ const SCHEMA_COMPONENTS: Record<string, () => z.core.JSONSchema.JSONSchema> = {
   RotateApplicationToken: () => z.toJSONSchema(RotateApplicationTokenSchema, { io: 'input' }),
   ImportData: () => z.toJSONSchema(ImportDataSchema, { io: 'input' }),
   ExactUrlSearch: () => z.toJSONSchema(ExactUrlSearchSchema, { io: 'input' }),
+  LinkPreview: () => z.toJSONSchema(LinkPreviewRequestSchema, { io: 'input' }),
 }
 
 const ROUTE_BODY_COMPONENTS: Record<string, Record<string, keyof typeof SCHEMA_COMPONENTS>> = {
@@ -41,6 +43,7 @@ const ROUTE_BODY_COMPONENTS: Record<string, Record<string, keyof typeof SCHEMA_C
   '/api/link/edit': { put: 'EditLink' },
   '/api/link/import': { post: 'ImportData' },
   '/api/link/search': { post: 'ExactUrlSearch' },
+  '/api/link/og-ai': { post: 'LinkPreview' },
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

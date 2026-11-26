@@ -2,7 +2,7 @@ import type { ApplicationLinkSettings } from '../../shared/schemas/application-l
 import type { Link } from '../../shared/schemas/link'
 import { env } from 'cloudflare:workers'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { clearLinkMigrationState, deleteStoredLinks, fetch, fetchWithAuth, getD1Link, postJson, putJson, setLinkStoreD1Mode } from '../utils'
+import { clearLinkMigrationState, deleteStoredLink, deleteStoredLinks, fetch, fetchWithAuth, getD1Link, postJson, putJson, setLinkStoreD1Mode } from '../utils'
 
 const appToken = 'test-application-link-token'
 const endpoint = '/api/link/shorten'
@@ -97,6 +97,89 @@ describe(endpoint, () => {
   it('rejects destinations that exceed the URL limit after encoding', async () => {
     const url = `https://maps.example.com/share/${'😀'.repeat(2000)}`
     expect((await requestShortLink(url)).status).toBe(400)
+  })
+
+  it('stores and redirects to a 64 KiB fragment-bearing destination intact', async () => {
+    const base = `${allowedPage}?mode=map#data=data:application/json;base64,`
+    const url = base + 'A'.repeat(65_536 - base.length)
+    const response = await requestShortLink(url)
+    if (response.status === 201) {
+      const { link } = await response.json() as { link: Link }
+      createdSlugs.push(link.slug)
+      expect(await getD1Link(link.slug)).toMatchObject({ url, redirectWithQuery: false })
+      const redirect = await fetch(`/${link.slug}?mode=other`, { redirect: 'manual' })
+      expect(redirect.status).toBe(302)
+      expect(redirect.headers.get('Cache-Control')).toBe('no-store')
+      expect(redirect.headers.get('Location') === url).toBe(true)
+    }
+    expect(response.status).toBe(201)
+  })
+
+  it('applies the 64 KiB limit after removing an explicit default port', async () => {
+    const url = `${allowedPage}#${'a'.repeat(65_536 - allowedPage.length - 1)}`
+    const submitted = url.replace('maps.example.com', 'maps.example.com:443')
+    const response = await requestShortLink(submitted)
+    expect(response.status).toBe(201)
+    const { link } = await response.json() as { link: Link }
+    createdSlugs.push(link.slug)
+    expect(link.url === url).toBe(true)
+  })
+
+  it('finds a stored long destination via the exact URL search body', async () => {
+    const url = `${allowedPage}#${'a'.repeat(40_000)}`
+    const response = await requestShortLink(url)
+    expect(response.status).toBe(201)
+    const { link } = await response.json() as { link: Link }
+    createdSlugs.push(link.slug)
+    const search = await postJson('/api/link/search', { url })
+    expect(search.status).toBe(200)
+    const results = await search.json() as Link[]
+    expect(results.some(item => item.slug === link.slug && item.url === url)).toBe(true)
+  })
+
+  it.each([
+    ['one byte over 64 KiB', `${allowedPage}#${'a'.repeat(65_537 - allowedPage.length - 1)}`, 400],
+    ['over 64 KiB after encoding', `${allowedPage}#${'😀'.repeat(5500)}`, 400],
+    ['with an oversized query', `${allowedPage}?data=${'a'.repeat(16_384)}#map`, 400],
+    ['outside the allowlist', `https://unlisted.example/#${'a'.repeat(40_000)}`, 403],
+  ])('rejects a destination %s', async (_label, url, status) => {
+    const response = await requestShortLink(url)
+    if (response.status === 201) {
+      const { link } = await response.json() as { link: Link }
+      createdSlugs.push(link.slug)
+    }
+    expect(response.status).toBe(status)
+  })
+
+  it('allows updates that keep the existing long destination', async () => {
+    const url = `${allowedPage}#${'a'.repeat(40_000)}`
+    const response = await requestShortLink(url)
+    expect(response.status).toBe(201)
+    const { link } = await response.json() as { link: Link }
+    createdSlugs.push(link.slug)
+    const edited = await putJson('/api/link/edit', { url, slug: link.slug, comment: 'Shared map' })
+    expect(edited.status).toBe(201)
+    expect(await getD1Link(link.slug)).toMatchObject({ url, comment: 'Shared map', redirectWithQuery: false })
+    expect((await putJson('/api/link/edit', { ...link, url: `${url}b` })).status).toBe(400)
+    expect((await putJson('/api/link/edit', { ...link, redirectWithQuery: true })).status).toBe(400)
+  })
+
+  it('restores an exported long application link', async () => {
+    const url = `${allowedPage}#${'a'.repeat(40_000)}`
+    const response = await requestShortLink(url)
+    expect(response.status).toBe(201)
+    const { link } = await response.json() as { link: Link }
+    createdSlugs.push(link.slug)
+    const exported = await fetchWithAuth('/api/link/export')
+    expect(exported.status).toBe(200)
+    const data = await exported.json() as { version: string, links: Link[] }
+    const saved = data.links.find(item => item.slug === link.slug)
+    expect(saved?.url === url).toBe(true)
+    await deleteStoredLink(link.slug)
+
+    const imported = await postJson('/api/link/import', { version: data.version, links: [saved] })
+    expect(imported.status).toBe(200)
+    expect(await getD1Link(link.slug)).toMatchObject({ url, redirectWithQuery: false })
   })
 
   it('rejects a request whose JSON exceeds the shortening body limit', async () => {

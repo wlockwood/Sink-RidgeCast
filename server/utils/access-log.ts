@@ -14,6 +14,9 @@ import {
 import { parseURL } from 'ufo'
 import { getFlag } from '#shared/utils/flag'
 
+const MAX_ANALYTICS_BLOB_BYTES = 16_000
+const blobEncoder = new TextEncoder()
+
 function toBlobNumber(blob: string) {
   return +blob.replace(/\D/g, '')
 }
@@ -75,10 +78,39 @@ export const logsMap = Object.fromEntries([
   ...Object.entries(doublesMap).map(([k, v]) => [v, k]),
 ]) as LogsMap
 
+const analyticsBlobKeys = (Object.keys(blobsMap) as BlobsKey[])
+  .sort((a, b) => toBlobNumber(a) - toBlobNumber(b))
+// Keep the fields used in metrics ahead of the destination and raw user agent.
+const analyticsBudgetOrder = [
+  ...analyticsBlobKeys.filter(key => key !== 'blob2' && key !== 'blob3'),
+  'blob2',
+  'blob3',
+].map(key => toBlobNumber(key) - 1)
+
 export function logs2blobs(logs: LogsMap) {
-  return (Object.keys(blobsMap) as BlobsKey[])
-    .sort((a, b) => toBlobNumber(a) - toBlobNumber(b))
-    .map(key => String(logs[blobsMap[key] as LogsKey] || ''))
+  const blobs = analyticsBlobKeys.map(key => String(logs[blobsMap[key]] || ''))
+  const sizes = blobs.map(value => blobEncoder.encode(value).byteLength)
+  if (sizes.reduce((total, size) => total + size, 0) <= MAX_ANALYTICS_BLOB_BYTES)
+    return blobs
+
+  const urlIndex = toBlobNumber('blob2') - 1
+  const url = blobs[urlIndex]!
+  const fragmentStart = url.indexOf('#')
+  if (fragmentStart !== -1) {
+    const requestUrl = url.slice(0, fragmentStart)
+    blobs[urlIndex] = requestUrl
+    sizes[urlIndex] = blobEncoder.encode(requestUrl).byteLength
+  }
+
+  let remainingBytes = MAX_ANALYTICS_BLOB_BYTES
+  for (const index of analyticsBudgetOrder) {
+    const size = sizes[index]!
+    if (size > remainingBytes)
+      blobs[index] = ''
+    else
+      remainingBytes -= size
+  }
+  return blobs
 }
 
 export function blobs2logs(blobs: string[]) {

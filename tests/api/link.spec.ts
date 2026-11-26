@@ -83,6 +83,22 @@ describe('/api/link/og-ai', () => {
     expect(response.status).toBe(400)
   })
 
+  it.each([0, 2500])('generates saveable metadata for a long URL with %i extra query characters', async (queryLength) => {
+    const runSpy = vi.spyOn(env.AI, 'run').mockRejectedValue(new Error('Workers AI unavailable'))
+    const toMarkdownSpy = vi.spyOn(env.AI, 'toMarkdown').mockRejectedValue(new Error('Markdown conversion unavailable'))
+    const page = `https://example.invalid/map?view=coverage${'a'.repeat(queryLength)}`
+    try {
+      const response = await postJson('/api/link/og-ai', { url: `${page}#${'a'.repeat(50_000)}` })
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({ title: 'example.invalid', description: `Short link for ${page}`.slice(0, 2048) })
+      expect(runSpy).toHaveBeenCalledOnce()
+    }
+    finally {
+      runSpy.mockRestore()
+      toMarkdownSpy.mockRestore()
+    }
+  })
+
   it('returns 400 when url parameter is invalid', async () => {
     const response = await fetchWithAuth('/api/link/og-ai?url=not-a-valid-url')
     expect(response.status).toBe(400)
