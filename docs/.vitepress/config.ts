@@ -72,6 +72,7 @@ export default defineConfig({
             ] },
             { text: 'Integrations', items: [
               { text: 'Integrations', link: '/integrations/' },
+              { text: 'Short Links for Desktop Apps', link: '/integrations/desktop-short-links' },
             ] },
             { text: 'Reference', items: [
               { text: 'API', link: '/api/' },

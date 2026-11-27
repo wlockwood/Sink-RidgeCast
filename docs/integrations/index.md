@@ -7,6 +7,8 @@ description: Connect Sink to AI coding tools through its built-in MCP server, pl
 
 Sink exposes an authenticated REST API and generated OpenAPI document for automation. The following projects and recipes provide convenient entry points; review third-party code and credential handling before use.
 
+To build a share action that creates links with a scoped token, see [Short Links for Desktop Apps](/integrations/desktop-short-links).
+
 ## AI Skills
 
 Install the repository's AI Skills package with:

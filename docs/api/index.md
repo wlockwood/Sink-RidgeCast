@@ -23,6 +23,8 @@ Authorization: Bearer YOUR_SITE_TOKEN
 
 Create a token and add allowed destinations in **Dashboard → Settings → Application Links**. A server-side application can use the separate token to create links with random slugs. The request body accepts `url` and an optional `prefix`. See [token rotation and usage](/configuration/#application-only-link-creation).
 
+For client setup, a worked request, and retry behavior, see [Short Links for Desktop Apps](/integrations/desktop-short-links).
+
 ```http
 POST /api/link/shorten
 Authorization: Bearer YOUR_LINK_CREATE_TOKEN
